@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+bin/
+dist/
+.DS_Store
