@@ -1,0 +1,98 @@
+# Helm values for the OpenMeter chart (deploy/charts/openmeter in
+# github.com/openmeterio/openmeter) on OpenShift.
+#
+# The chart bundles ClickHouse (via the Altinity operator), Kafka, PostgreSQL
+# and Redis. These are development-grade dependencies; this file only trims
+# their footprint and adapts security contexts to the OpenShift restricted SCC.
+
+global:
+  compatibility:
+    openshift:
+      adaptSecurityContext: force
+
+kafka:
+  # Single broker: the Bitnami defaults (replication factor 3) make Kafka fail
+  # to create __consumer_offsets, so consumers can never form a group and the
+  # sink worker silently ingests nothing.
+  extraConfigYaml:
+    offsets.topic.replication.factor: 1
+    transaction.state.log.replication.factor: 1
+    transaction.state.log.min.isr: 1
+    default.replication.factor: 1
+  controller:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+  listeners:
+    client:
+      protocol: PLAINTEXT
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: gp3-csi
+  zookeeper:
+    enabled: false
+  kraft:
+    enabled: true
+
+postgresql:
+  architecture: standalone
+  primary:
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: gp3-csi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+redis:
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+# v1.0.0-beta.213 ships no openmeter-billing-worker binary (the image only
+# contains openmeter, openmeter-balance-worker, openmeter-notification-service
+# and openmeter-sink-worker), so the billing worker crash-loops. Billing is not
+# needed for the metering/entitlement PoC.
+billingWorker:
+  replicaCount: 0
+
+# The chart hardcodes the API container port to 80, which the OpenShift
+# restricted SCC cannot bind; scripts/install-openmeter.sh patches it to 6443.
+# Keep the service port in sync so the route and in-cluster clients agree.
+# Port 6443 is also the only non-DNS egress port the MaaS gateway's
+# NetworkPolicy allows.
+service:
+  type: ClusterIP
+  port: 6443
+
+clickhouse:
+  operator:
+    install: true
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: gp3-csi

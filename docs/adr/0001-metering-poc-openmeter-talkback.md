@@ -564,14 +564,122 @@ Use Given / When / Then as one logical block per criterion:
 
 > Next AI / human implementer: replace this section with findings — do not delete the questions.
 
-- Praxis image tag:
-- OpenMeter version:
-- `token_count` matrix (provider × token keys observed):
-- `external_metering` sample CE (link to committed JSON):
-- Emit strategy chosen (per-slice vs multi-field):
-- Custom filter / projector required? (yes/no + rationale):
-- OpenMeter JSONPaths final:
-- Talk-back ↔ customer key mapping:
+- Praxis image tag: `quay.io/opendatahub/odh-praxis-extproc@sha256:889a9f6e59b60ddc0165739869207a6bdd3e79b6d6a6b3ac09f0b3405f366dd3`
+  (runs as `praxis-extproc 0.1.0`, built on `praxis-ai-filters` v0.9.0).
+- OpenMeter version: chart `1.0.0-beta.213` / app `v1.0.0-beta.213`, installed
+  from `openmeterio/openmeter` `deploy/charts/openmeter`. The project publishes
+  no Helm chart repository.
+- `external_metering` availability: registered unconditionally in
+  `praxis-ai-filters` v0.9.0 (`filters/src/register.rs`) and present in the
+  deployed image. `praxis-extproc -c <file> -t` accepts a chain containing the
+  filter, so no custom image is required.
+- Filter configuration used for the PoC (verified end to end):
+
+  ```yaml
+  - filter: external_metering
+    metering_url: "http://openmeter-api.metering.svc.cluster.local:6443"
+    allow_private_endpoint: true
+    timeout_seconds: 5
+    feature_key: "inference_tokens"
+    source: "maas-gateway"
+    fail_open: true
+    identity_header_prefix: "x-maas-"
+    default_username: "cluster_admin"
+    default_model: "unknown"
+  - filter: token_count
+    provider: openai
+  ```
+
+  `default_username` is required: Authorino's `x-maas-*` headers are not
+  visible to this ExtProc, and without a default the filter skips metering
+  entirely. The value must satisfy OpenMeter's customer key regex.
+  `token_count` is also required: it parses the provider response and publishes
+  `token.input` / `token.output` / `token.total` in `filter_metadata`, which
+  `external_metering` reads in its response phase. Without it every usage event
+  reports zero tokens.
+- Active ExtProc for gateway traffic: deployment `payload-processing` in
+  `openshift-ingress`, ConfigMap `payload-processing-plugins`, chain `ipp`,
+  wired by the gateway `EnvoyFilter` at `payload-processing.openshift-ingress:9004`.
+  The `payload-processing-external-model` ExtProc in `models-as-a-service`
+  serves provider-side traffic and is not on this path; injecting the filter
+  there has no effect.
+- Filter order: `external_metering` is inserted as the first item of `ipp`,
+  before the `headers` filter, because `headers` removes all `x-maas-*`
+  request headers.
+- `token_count` matrix (provider × token keys observed): `provider: openai`
+  against the simulated OPT-125M model. Non-streaming completion returned
+  `prompt_tokens: 11`, `completion_tokens: 3`, `total_tokens: 14`, and the
+  CloudEvent carried those values. Streaming (`stream: true`) and
+  non-streaming both produce a usage event. The event always carries
+  `prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_input_tokens`,
+  `cache_creation_tokens` and `reasoning_tokens`, defaulting missing counts to
+  zero.
+- `external_metering` sample CE observed through the gateway:
+
+  ```json
+  {"specversion":"1.0","id":"5fde71e14eebd8de16f3000000000000",
+   "source":"maas-gateway","type":"inference.tokens.used",
+   "subject":"cluster_admin","datacontenttype":"application/json",
+   "time":"2026-11-09T21:15:40Z",
+   "data":{"cache_creation_tokens":0,"cached_input_tokens":0,
+           "completion_tokens":3,"cost_center":"","duration_ms":15,
+           "group":"","model":"facebook/opt-125m","organization_id":"",
+           "prompt_tokens":11,"provider":"","reasoning_tokens":0,
+           "subscription":"","total_tokens":14,"user":"cluster_admin",
+           "user_agent":"curl/8.18.0"}}
+  ```
+- Emit strategy chosen (per-slice vs multi-field): multi-field, one event per
+  response carrying all token types.
+- Custom filter / projector required? No. The stock Rust filter emits the
+  CloudEvent and performs the entitlement preflight. The Go
+  `external-metering` IPP plugin exists as an alternative but is not needed for
+  the MaaS external-model path.
+- OpenMeter JSONPaths final: meter `tokens_total`, event type
+  `inference.tokens.used`, `SUM` aggregation on `$.total_tokens`. Feature key
+  must be `inference_tokens` because OpenMeter feature and meter slugs allow
+  only lowercase alphanumerics and underscores.
+- Talk-back ↔ customer key mapping: OpenMeter customer key = MaaS username,
+  with `usageAttribution.subjectKeys` set to the same value so the CloudEvent
+  `subject` is attributed correctly. Keys must match
+  `^[a-z0-9]+(?:_[a-z0-9]+)*$`; hyphenated OpenShift usernames (for example
+  `htpasswd-cluster-admin-user`) are rejected with HTTP 400, so the PoC uses
+  `cluster_admin`. A productized integration needs a deterministic
+  username → valid-key mapping.
+- Entitlements in `v1.0.0-beta.213` are created under the subject:
+  `POST /api/v1/subjects/{subject}/entitlements`. The
+  `/api/v1/customers/{key}/entitlements` routes return 404. The balance path
+  returns 200 with `hasAccess`, usage and balance when an entitlement exists,
+  404 when none exists (`fail_open` admits the request), and the filter rejects
+  with HTTP 429 `token budget exhausted` when usage exceeds the grant.
+- No consumer ever joined a Kafka group until the replication factor was fixed.
+  The bundled Bitnami Kafka defaults to `offsets.topic.replication.factor=3`
+  on a single broker, so `__consumer_offsets` never gets created, the sink
+  worker silently consumes nothing, and events stay invisible while the ingest
+  API keeps returning 204. `deploy/openmeter/values-openshift.yaml` sets
+  `kafka.extraConfigYaml` with replication factor and min ISR of 1.
+- OpenShift service ports and NetworkPolicy: the `payload-processing`
+  NetworkPolicy allows only DNS and TCP 443/6443 egress, and OVN matches the
+  policy after service DNAT. A service port 443 → pod 8080 mapping is blocked.
+  The OpenMeter API therefore listens on 6443 (unprivileged for the restricted
+  SCC, which refuses even `NET_BIND_SERVICE` binds to 443) and the filter calls
+  it over plain HTTP on that port.
+- TLS to the API route from the filter does not work in this cluster: the
+  router's edge certificate is self-signed for the wildcard apps domain and
+  the filter's HTTP client is built at startup with a fixed root store, so
+  mounting the router CA and setting `SSL_CERT_FILE` does not help. The filter
+  also caches its HTTP client, so a `metering_url` change needs an ExtProc
+  restart even though the config file hot-reloads.
+- Controller ownership: `ai-gateway-controller` renders
+  `payload-processing-plugins` and the `payload-processing` Deployment itself,
+  so a manual `extproc.yaml` edit is reverted within about 30 seconds.
+  `scripts/enable-maas-metering.sh` patches the ConfigMap and immediately
+  restarts the Deployment so the new pod starts with the metered config; a
+  durable productized solution needs a supported extension point in the
+  controller template.
+- OpenMeter image gaps in `v1.0.0-beta.213`: the image does not contain
+  `openmeter-billing-worker` or `openmeter-jobs`, so the billing worker and
+  billing CronJobs cannot run (billing is disabled/suspended), and the API
+  serves only `/api/v1` (no `/api/v2`).
 
 ---
 

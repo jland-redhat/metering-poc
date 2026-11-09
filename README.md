@@ -14,7 +14,39 @@ Product intent lives in `models-as-a-service` under `METERING_PROPOSAL/` (`overv
 
 ## Status
 
-Scaffolding: ADR only. Implementation phases are defined in ADR 0001.
+Phase 0 findings are recorded in ADR 0001 §13. The PoC runs end to end on the
+cluster: the gateway reports usage, OpenMeter stores it, the meter aggregates
+it, and an exhausted entitlement is enforced at the gateway with HTTP 429.
+
+Deployment assets for the cluster PoC live under `deploy/` and `scripts/`:
+
+- `deploy/openmeter/` — Helm values and install notes for OpenMeter on
+  OpenShift, including its bundled ClickHouse, Kafka, PostgreSQL and Redis.
+- `scripts/install-openmeter.sh` — install OpenMeter into the `metering`
+  namespace. The API listens on port 6443 and is exposed through an edge route.
+- `scripts/seed-openmeter.sh` — create the meter, feature, customer and
+  metered entitlement that the gateway filter expects. Usernames must match
+  OpenMeter's key regex (lowercase, digits, underscores).
+- `scripts/enable-maas-metering.sh` — inject the `external_metering` and
+  `token_count` filters into the `ipp` chain of the gateway ExtProc
+  (`openshift-ingress`, deployment `payload-processing`). The
+  `ai-gateway-controller` reverts this ConfigMap, so re-run the script after
+  gateway or tenant changes.
+- `scripts/smoke-test.sh` — send one inference request through the gateway and
+  confirm OpenMeter received the usage event with non-zero token counts.
+
+The deployed MaaS ExtProc image (`quay.io/opendatahub/odh-praxis-extproc`)
+already contains the Rust `external_metering` and `token_count` filters, so the
+gateway side is a configuration change rather than a custom image build.
+
+## Quick start
+
+```bash
+./scripts/install-openmeter.sh
+./scripts/seed-openmeter.sh --user cluster_admin --grant 100000
+./scripts/enable-maas-metering.sh
+MAAS_API_KEY="$(oc whoami -t)" ./scripts/smoke-test.sh
+```
 
 ## Container runtime
 
