@@ -13,6 +13,7 @@ Environment:
 """
 
 import os
+import threading
 
 import requests
 from flask import Flask, jsonify, render_template, request
@@ -27,6 +28,16 @@ PORT = int(os.environ.get("PORT", "8080"))
 # tokens only, so a relay route prices each event before it reaches OpenMeter.
 COST_METER = os.environ.get("COST_METER", "cost_usd")
 COST_FEATURE = os.environ.get("COST_FEATURE", "inference_cost")
+# Editor only: base URL of the metering relay, which owns the enforcement
+# switch. The relay's own copy of this variable is left unset.
+METERING_PROXY_URL = os.environ.get("METERING_PROXY_URL", "").rstrip("/")
+# Relay only: whether an exhausted entitlement blocks traffic. The gateway
+# ExtProc balance check asks the relay for the subject's balance; when
+# enforcement is off the relay answers "allowed" and traffic keeps flowing
+# while usage is still metered.
+ENFORCE_DEFAULT = os.environ.get("ENFORCE_DEFAULT", "on").lower() not in ("off", "false", "0")
+_enforce_lock = threading.Lock()
+_enforce = ENFORCE_DEFAULT
 
 app = Flask(__name__)
 
@@ -536,14 +547,57 @@ def events():
     return forward_event(event)
 
 
+def _enforcement_state():
+    with _enforce_lock:
+        return {"enforce": _enforce, "default": ENFORCE_DEFAULT}
+
+
+@app.get("/api/enforcement")
+def get_enforcement():
+    if METERING_PROXY_URL:
+        try:
+            resp = requests.get(f"{METERING_PROXY_URL}/api/enforcement", timeout=5)
+            return (resp.content, resp.status_code, {"content-type": resp.headers.get("content-type", "application/json")})
+        except requests.RequestException as exc:
+            raise OpenMeterError(f"cannot reach metering relay at {METERING_PROXY_URL}: {exc}") from exc
+    return jsonify(_enforcement_state())
+
+
+@app.post("/api/enforcement")
+def set_enforcement():
+    global _enforce
+    if METERING_PROXY_URL:
+        try:
+            resp = requests.post(
+                f"{METERING_PROXY_URL}/api/enforcement",
+                json=request.get_json(silent=True) or {},
+                timeout=5,
+            )
+            return (resp.content, resp.status_code, {"content-type": resp.headers.get("content-type", "application/json")})
+        except requests.RequestException as exc:
+            raise OpenMeterError(f"cannot reach metering relay at {METERING_PROXY_URL}: {exc}") from exc
+    payload = request.get_json(silent=True) or {}
+    if "enforce" not in payload:
+        return jsonify({"error": "body must be {\"enforce\": true|false}"}), 400
+    with _enforce_lock:
+        _enforce = bool(payload["enforce"])
+    return jsonify(_enforcement_state())
+
+
 @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
 def passthrough(path):
     """Forward every other OpenMeter API call unchanged.
 
     The external_metering filter checks the subject's balance before a
-    request and reports usage after it. Only the usage report needs pricing,
-    so the balance lookup and any other call are proxied as-is.
+    request and reports usage after it. Only the usage report needs pricing.
+    When enforcement is switched off the balance answer is replaced with
+    "allowed", so traffic keeps flowing while usage is still metered.
     """
+    if path.endswith("/value") and "/entitlements/" in path:
+        with _enforce_lock:
+            enforce = _enforce
+        if not enforce:
+            return jsonify({"balance": 0, "usage": 0, "overage": 0, "hasAccess": True})
     url = f"{OPENMETER_URL}/{path}"
     try:
         resp = requests.request(

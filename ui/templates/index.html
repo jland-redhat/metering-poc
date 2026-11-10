@@ -64,6 +64,20 @@
       </table>
     </section>
 
+    <section id="enforcement">
+      <h2>Budget enforcement</h2>
+      <p class="meta">The gateway asks the metering relay for the subject's
+        balance before every call. With enforcement on, an exhausted budget
+        makes that answer <code>hasAccess: false</code> and the gateway
+        returns HTTP 429. With it off, the relay answers "allowed" and traffic
+        keeps flowing while usage is still metered and shown above.</p>
+      <label class="toggle">
+        <input type="checkbox" id="enforce" checked>
+        <span>Block traffic over budget</span>
+      </label>
+      <span id="enforce-status" class="status"></span>
+    </section>
+
     <section id="subs">
       <h2>Subscriptions</h2>
       <ul id="sub-list"></ul>

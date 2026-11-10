@@ -269,11 +269,58 @@ async function save() {
   }
 }
 
+async function loadEnforcement() {
+  const box = $("#enforce");
+  try {
+    const res = await fetch("/api/enforcement");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    box.checked = Boolean(data.enforce);
+    setEnforceStatus("");
+  } catch (err) {
+    setEnforceStatus(`Could not read enforcement: ${err.message}`, "err");
+  }
+}
+
+function setEnforceStatus(message, kind) {
+  const el = $("#enforce-status");
+  el.textContent = message || "";
+  el.className = `status ${kind || ""}`;
+}
+
+async function saveEnforcement(enforce) {
+  const box = $("#enforce");
+  box.disabled = true;
+  try {
+    const res = await fetch("/api/enforcement", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enforce }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    box.checked = Boolean(data.enforce);
+    setEnforceStatus(
+      data.enforce ? "Enforcement on." : "Enforcement off — traffic is metered but not blocked.",
+      data.enforce ? "ok" : "",
+    );
+  } catch (err) {
+    box.checked = !enforce;
+    setEnforceStatus(`Could not change enforcement: ${err.message}`, "err");
+  } finally {
+    box.disabled = false;
+  }
+}
+
+$("#enforce").addEventListener("change", (e) => saveEnforcement(e.target.checked));
+
 $("#save").addEventListener("click", save);
 $("#reset").addEventListener("click", () => {
   load();
   loadBudgets();
+  loadEnforcement();
 });
 
 load();
 loadBudgets();
+loadEnforcement();

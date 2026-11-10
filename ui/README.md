@@ -189,6 +189,36 @@ Limits of this approach:
 - The configmaps are rendered by ai-gateway-controller, so re-run the script
   after a gateway reconcile or upgrade.
 
+## Enforcement switch
+
+`external_metering` is the Envoy ExtProc filter that blocks over-budget
+traffic: its pre-request balance check rejects with HTTP 429 when the
+entitlement's `hasAccess` is false. The relay sits in that callout path, so it
+can also mask the answer. The Budget enforcement checkbox on the page calls:
+
+```
+GET  /api/enforcement           -> {"enforce": true|false, "default": ...}
+POST /api/enforcement           -> body {"enforce": false}
+```
+
+- **On** — balance answers pass through. An exhausted budget returns 429.
+- **Off** — the relay answers every balance check with `hasAccess: true`.
+  Traffic keeps flowing, usage is still metered and priced, and the budget row
+  shows the overage. Useful for demos and for distinguishing metering faults
+  from enforcement faults.
+
+The editor forwards both calls to the relay (`METERING_PROXY_URL`), which owns
+the switch. The state is in-memory in the relay pod and resets to
+`ENFORCE_DEFAULT` (on) when the pod restarts.
+
+Verified on this PoC with a 0.05 dollar budget:
+
+```
+enforce on,  usage 0.078 -> HTTP 429 "token budget exhausted"
+enforce off, 3 calls    -> HTTP 200, usage 0.147 (over budget, metered)
+enforce on              -> HTTP 429 again
+```
+
 ### The best solution
 
 The relay is a PoC workaround, not the shape this should take in a product.
@@ -248,6 +278,8 @@ subject crosses it.
 | `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent, unit and admission; optional `?subject=` filter and `?summary=1` for a single ADMIT/REJECT value |
 | `POST` | `/api/budgets` | Body `{"subject": "<subjectKey>", "featureKey": "<feature>", "amount": <grant>}`; overrides the entitlement grant |
 | `GET` | `/api/costs?from=&to=` | Usage joined to prices; one row per subject/meter/model with `cost`; optional `subject`, `meter` and `model` filters |
+| `GET` | `/api/enforcement` | Enforcement switch state; forwarded to the relay |
+| `POST` | `/api/enforcement` | Body `{"enforce": <bool>}`; switches the relay's balance answer |
 | `POST` | `/meter` | Metering relay: prices one usage CloudEvent and forwards it to OpenMeter |
 | `*` | `/<path>` | Any other path proxied to OpenMeter unchanged (the filter's balance check) |
 
@@ -314,6 +346,9 @@ restart.
   budget filter in ADR 0002 (402 with a richer reason) is still design only.
   The check reads one feature per filter, so a subject is cut off on tokens or
   dollars depending on the installed `feature_key`, not on both.
+- **The enforcement switch is per relay pod.** It is process memory, not a
+  Kubernetes object, so it resets on restart and would not stay consistent
+  with more than one replica.
 - **No invoices.** The `openmeter-jobs` binary is missing from the
   `v1.0.0-beta.213` image, so billing CronJobs cannot run. Spend in this app and
   in Grafana is computed on read.

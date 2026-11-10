@@ -115,6 +115,9 @@ button.small { padding: 4px 10px; font-size: 0.85rem; }
 #budget-table td, td.num { font-variant-numeric: tabular-nums; }
 .denied { color: var(--err); }
 
+.toggle { display: inline-flex; align-items: center; gap: 8px; margin-right: 12px; }
+.toggle input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+
 #sub-list { padding-left: 20px; color: var(--muted); }
 #sub-list li { margin: 4px 0; }
 #sub-list .active { color: var(--ok); }
