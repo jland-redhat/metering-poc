@@ -1,0 +1,196 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "bargauge",
+      "title": "Tokens by subject",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 100000},
+              {"color": "red", "value": 1000000}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_total/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "columns": [
+            {"selector": "subject", "text": "subject", "type": "string"},
+            {"selector": "value", "text": "value", "type": "number"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Remaining balance: ${subject}",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "balance", "text": "balance", "type": "number"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Usage this period: ${subject}",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "short", "color": {"mode": "fixed", "fixedColor": "blue"}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "usage", "text": "usage", "type": "number"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Entitlements",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/entitlements",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "subjectKey", "text": "subject", "type": "string"},
+            {"selector": "featureKey", "text": "feature", "type": "string"},
+            {"selector": "issueAfterReset", "text": "grant", "type": "number"},
+            {"selector": "isUnlimited", "text": "unlimited", "type": "string"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Recent usage events",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "time", "desc": true}]},
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/events?from=${__from:date:iso}&to=${__to:date:iso}",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "event.time", "text": "time", "type": "string"},
+            {"selector": "event.subject", "text": "subject", "type": "string"},
+            {"selector": "event.type", "text": "type", "type": "string"},
+            {"selector": "event.data.total_tokens", "text": "total_tokens", "type": "number"},
+            {"selector": "event.data.model", "text": "model", "type": "string"}
+          ]
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["openmeter", "metering", "maas"],
+  "templating": {
+    "list": [
+      {
+        "name": "subject",
+        "label": "Subject",
+        "type": "textbox",
+        "query": "cluster_admin",
+        "current": {"text": "cluster_admin", "value": "cluster_admin"}
+      }
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timezone": "utc",
+  "title": "OpenMeter usage",
+  "uid": "openmeter-usage",
+  "version": 1
+}

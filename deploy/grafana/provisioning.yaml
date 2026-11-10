@@ -1,0 +1,33 @@
+# Grafana provisioning: the Infinity datasource points at the OpenMeter v1 API,
+# and the dashboard provider loads JSON from the mounted dashboard ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: metering
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: OpenMeter
+        uid: openmeter
+        type: yesoreyeram-infinity-datasource
+        access: proxy
+        # In-cluster plain HTTP on 6443; the API has no auth in this PoC.
+        url: http://openmeter-api.metering.svc.cluster.local:6443
+        isDefault: true
+        editable: true
+        jsonData:
+          auth_method: none
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: openmeter
+        orgId: 1
+        folder: OpenMeter
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /etc/grafana/dashboards
