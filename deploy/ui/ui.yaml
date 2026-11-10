@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: editor
-          image: quay.io/jland/maas-metering-poc:latest
+          image: image-registry.openshift-image-registry.svc:5000/metering/maas-metering-poc:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -87,7 +87,7 @@ spec:
     spec:
       containers:
         - name: proxy
-          image: quay.io/jland/maas-metering-poc:latest
+          image: image-registry.openshift-image-registry.svc:5000/metering/maas-metering-poc:latest
           imagePullPolicy: Always
           ports:
             - name: http

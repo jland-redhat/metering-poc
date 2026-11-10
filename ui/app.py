@@ -699,8 +699,16 @@ def budgets():
             # One value for a Grafana stat panel: a subject is admitted only
             # when every entitlement it holds still reports hasAccess.
             admitted = all(r.get("hasAccess") for r in rows) if rows else None
+            # An array of rows because Grafana Infinity reads table data best
+            # from a JSON array.
             return jsonify(
-                {"admission": "NO DATA" if admitted is None else ("ADMIT" if admitted else "REJECT")}
+                [
+                    {
+                        "admission": "NO DATA"
+                        if admitted is None
+                        else ("ADMIT" if admitted else "REJECT")
+                    }
+                ]
             )
         return jsonify({"rows": rows})
     except OpenMeterError as exc:

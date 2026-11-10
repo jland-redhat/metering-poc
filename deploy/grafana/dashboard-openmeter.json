@@ -157,7 +157,7 @@
    "id": 22,
    "type": "stat",
    "title": "Admission Hook \u2014 ${subject}",
-   "description": "Entitlement answer for the subject: ADMIT while the grant covers usage, REJECT once it is exhausted. The gateway budget filter that would enforce REJECT is not deployed yet.",
+   "description": "Entitlement answer for the subject: ADMIT while every grant covers usage, REJECT once one is exhausted. The gateway budget filter enforces REJECT with HTTP 402.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
     "uid": "openmeter-costs"
@@ -188,7 +188,29 @@
    "fieldConfig": {
     "defaults": {
      "unit": "none",
-     "noValue": "NO DATA"
+     "noValue": "NO DATA",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "ADMIT": {
+         "text": "ADMIT",
+         "color": "green",
+         "index": 0
+        },
+        "REJECT": {
+         "text": "REJECT",
+         "color": "red",
+         "index": 1
+        },
+        "NO DATA": {
+         "text": "NO DATA",
+         "color": "text",
+         "index": 2
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },

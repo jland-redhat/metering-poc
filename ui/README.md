@@ -176,7 +176,7 @@ Verified end to end on this PoC:
   produces `cost: 0.047` at the relay.
 - Three gateway calls moved the dollar entitlement from 50.00 to 49.863.
 - With a 0.10 dollar budget, traffic spent 0.196, `hasAccess` became false and
-  the next calls returned HTTP 429.
+  the next calls returned HTTP 402 (`token budget exhausted`).
 - Raising the budget back to 50.00 restored HTTP 200.
 
 Limits of this approach:
@@ -193,7 +193,10 @@ Limits of this approach:
 
 `external_metering` is the Envoy ExtProc filter that blocks over-budget
 traffic: its pre-request balance check rejects with HTTP 429 when the
-entitlement's `hasAccess` is false. The relay sits in that callout path, so it
+entitlement's `hasAccess` is false. The praxis filter hardcodes 429, so a
+small Envoy Lua filter (`deploy/extproc/budget-status-402.yaml`) rewrites that
+one local reply to HTTP 402 before the response leaves the gateway. Matching
+is on the response body, so Kuadrant's own rate-limit 429s are unchanged. The relay sits in that callout path, so it
 can also mask the answer. The Budget enforcement checkbox on the page calls:
 
 ```
@@ -201,7 +204,7 @@ GET  /api/enforcement           -> {"enforce": true|false, "default": ...}
 POST /api/enforcement           -> body {"enforce": false}
 ```
 
-- **On** — balance answers pass through. An exhausted budget returns 429.
+- **On** — balance answers pass through. An exhausted budget returns 402.
 - **Off** — the relay answers every balance check with `hasAccess: true`.
   Traffic keeps flowing, usage is still metered and priced, and the budget row
   shows the overage. Useful for demos and for distinguishing metering faults
@@ -214,9 +217,9 @@ the switch. The state is in-memory in the relay pod and resets to
 Verified on this PoC with a 0.05 dollar budget:
 
 ```
-enforce on,  usage 0.078 -> HTTP 429 "token budget exhausted"
+enforce on,  usage 0.078 -> HTTP 402 "token budget exhausted"
 enforce off, 3 calls    -> HTTP 200, usage 0.147 (over budget, metered)
-enforce on              -> HTTP 429 again
+enforce on              -> HTTP 402 again
 ```
 
 ### The best solution
@@ -233,8 +236,8 @@ The clean design puts pricing where the event is produced:
    meter so budget, invoice and dashboard all agree on one number.
 3. **Enforce in the gateway, on the same number.** The budget filter from
    [ADR 0002](../docs/adr/0002-envoy-budget-filter.md) should read the same
-   entitlement the balance check reads and return 402/429 at the boundary.
-   Today admissions are advisory only.
+   entitlement the balance check reads and return 402 at the boundary, so the
+   Lua rewrite is not needed.
 
 Until (1) exists, the relay is the smallest change that shows a dollar budget
 cutting off real traffic.
@@ -311,14 +314,21 @@ Then open `http://127.0.0.1:8080`.
 
 ## Build and deploy
 
+Build inside the cluster so no external registry push is needed:
+
 ```bash
 cd ui
-podman build -t quay.io/jland/maas-metering-poc:v1 .
-podman push quay.io/jland/maas-metering-poc:v1
+oc new-build --binary --strategy=docker --name=maas-metering-poc -n metering \
+  --to=maas-metering-poc:latest
+oc start-build maas-metering-poc -n metering --from-dir=. --follow
 oc apply -f ../deploy/ui/ui.yaml
 oc rollout status deploy/openmeter-price-editor -n metering
 oc rollout status deploy/openmeter-metering-proxy -n metering
 ```
+
+To use an external registry instead, build and push
+`quay.io/jland/maas-metering-poc:v1`, then change the two `image:` lines in
+`deploy/ui/ui.yaml` to that tag.
 
 The same image runs twice: `openmeter-price-editor` serves the page, and
 `openmeter-metering-proxy` is the metering relay on port 6443 (the only ports
@@ -332,8 +342,9 @@ The Deployment runs as UID 1001 with a restricted security context, exposes
 https://openmeter-price-editor-metering.apps.<cluster-domain>/
 ```
 
-The deployment pulls `quay.io/jland/maas-metering-poc:latest` with
-`imagePullPolicy: Always`, so a new `:latest` push is picked up on the next pod
+The deployments pull
+`image-registry.openshift-image-registry.svc:5000/metering/maas-metering-poc:latest`
+with `imagePullPolicy: Always`, so a new build is picked up on the next pod
 restart.
 
 ## Known gaps
@@ -342,7 +353,8 @@ restart.
   gateway does not emit one. The relay in this app supplies it; a product
   should price inside the metering filter instead (see "The best solution").
 - **Enforcement is the balance check, not ADR 0002.** `external_metering`
-  rejects with HTTP 429 when the feature's `hasAccess` is false. The separate
+  rejects when the feature's `hasAccess` is false; the gateway rewrites that
+  reply to HTTP 402. The separate
   budget filter in ADR 0002 (402 with a richer reason) is still design only.
   The check reads one feature per filter, so a subject is cut off on tokens or
   dollars depending on the installed `feature_key`, not on both.

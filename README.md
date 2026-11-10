@@ -17,7 +17,7 @@ Product intent lives in `models-as-a-service` under `METERING_PROPOSAL/` (`overv
 
 Phase 0 findings are recorded in ADR 0001 §13. The PoC runs end to end on the
 cluster: the gateway reports usage, OpenMeter stores it, the meter aggregates
-it, and an exhausted entitlement is enforced at the gateway with HTTP 429.
+it, and an exhausted entitlement is enforced at the gateway with HTTP 402.
 
 Deployment assets for the cluster PoC live under `deploy/` and `scripts/`:
 

@@ -1,0 +1,52 @@
+# Return 402 Payment Required instead of 429 when the metering filter blocks a
+# call for budget exhaustion.
+#
+# The praxis external_metering filter hardcodes 429 for a failed balance check
+# (STATUS_BUDGET_EXHAUSTED in filters/src/metering/mod.rs). That is a rate-limit
+# status, not a payment status, and it is indistinguishable from the gateway's
+# own rate limiting. This Envoy Lua filter rewrites that one local reply to 402
+# and leaves every other 429 alone.
+#
+# Matching is on the rejection body, not just the status, so a genuine 429 from
+# Kuadrant rate limiting still returns 429.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: maas-budget-status-402
+  namespace: openshift-ingress
+spec:
+  priority: 20
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: maas-default-gateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.wasm
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.budget_status_402
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            default_source_code:
+              inline_string: |
+                function envoy_on_response(handle)
+                  if handle:headers():get(":status") ~= "429" then
+                    return
+                  end
+                  local body = handle:body()
+                  if body == nil then
+                    return
+                  end
+                  local text = body:getBytes(0, body:length()) or ""
+                  if string.find(text, "token budget exhausted", 1, true) then
+                    handle:headers():replace(":status", "402")
+                  end
+                end

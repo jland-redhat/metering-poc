@@ -7,10 +7,11 @@
 #   ./scripts/traffic-test.sh --count 20 --max-tokens 64
 #   ./scripts/traffic-test.sh --model publishers/llm/models/facebook/opt-125m
 #
-# The loop records the HTTP status of every call and stops at the first 402 or
-# 429 by default. Both mean an admission filter rejected the request: the
-# external_metering balance check returns 429 when the entitlement's
-# hasAccess is false, whether the budget is tokens or dollars. The feature the
+# The loop records the HTTP status of every call and stops at the first 402 by
+# default. A 402 means the admission filter rejected the request: the
+# external_metering balance check found hasAccess false, whether the budget is
+# tokens or dollars, and the gateway rewrites that reply to 402. A bare 429 is
+# rate limiting, not budget exhaustion. The feature the
 # check reads is the filter's feature_key (see enable-maas-metering.sh
 # --feature). Without that filter installed, calls keep returning 200 and the
 # script reports "all calls admitted".
@@ -99,7 +100,7 @@ t = u.get("total_tokens", p + c) or 0
 print(int(p), int(c), int(t))' 2>/dev/null || echo '0 0 0')"
     sum_prompt=$((sum_prompt + prompt_t))
     sum_completion=$((sum_completion + compl_t))
-  elif [[ "${CODE}" == "402" || "${CODE}" == "429" ]]; then
+  elif [[ "${CODE}" == "402" ]]; then
     exhausted_count=$((exhausted_count + 1))
   else
     fail_count=$((fail_count + 1))
@@ -112,9 +113,9 @@ print(int(p), int(c), int(t))' 2>/dev/null || echo '0 0 0')"
     echo "  body: $(printf '%s' "${BODY}" | head -c 200)"
   fi
 
-  if [[ ( "${CODE}" == "402" || "${CODE}" == "429" ) && "${STOP_ON_EXHAUSTED}" -eq 1 ]]; then
+  if [[ "${CODE}" == "402" && "${STOP_ON_EXHAUSTED}" -eq 1 ]]; then
     echo
-    echo "balance exhausted at request ${i} - gateway returned HTTP ${CODE}"
+    echo "balance exhausted at request ${i} - gateway returned HTTP 402"
     break
   fi
 
@@ -128,7 +129,7 @@ echo "summary: ok=${ok_count} exhausted=${exhausted_count} other=${fail_count}"
 echo "tokens:  prompt=${sum_prompt} completion=${sum_completion} total=$((sum_prompt + sum_completion))"
 
 if [[ "${exhausted_count}" -gt 0 ]]; then
-  echo "Outcome: HTTP 402/429 observed - Admission Hook rejected the request."
+  echo "Outcome: HTTP 402 observed - Admission Hook rejected the request."
 elif [[ "${ok_count}" -eq 0 ]]; then
   echo "Outcome: no successful calls." >&2
   exit 1
