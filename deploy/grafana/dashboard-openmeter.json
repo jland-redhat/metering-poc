@@ -5,11 +5,196 @@
   "links": [],
   "panels": [
     {
+      "id": 20,
+      "type": "stat",
+      "title": "Wallet balance — ${subject}",
+      "description": "Tokens left in the subject's OpenMeter entitlement, converted to USD at the opt-125m prompt list price ($0.0015 per token) so the top row reads in money.",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "text": {"valueSize": 52, "titleSize": 14}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 0.01}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "balance", "text": "balance", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "balance", "operator": "*", "right": "0.0015"},
+            "alias": "wallet_usd",
+            "replaceFields": true
+          }
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Spent — ${subject}",
+      "description": "Tokens used in the current usage period, converted to USD at the opt-125m prompt list price ($0.0015 per token). Exact per-model spend is in the detail panels at the bottom.",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "text": {"valueSize": 52, "titleSize": 14}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "color": {"mode": "fixed", "fixedColor": "orange"}
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "usage", "text": "usage", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "usage", "operator": "*", "right": "0.0015"},
+            "alias": "spend_usd",
+            "replaceFields": true
+          }
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Admission Hook — ${subject}",
+      "description": "Live answer from the external_metering ExtProc filter: hasAccess=true admits the request, hasAccess=false rejects it with the budget-exhausted error.",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "text": {"valueSize": 52, "titleSize": 14},
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "true": {"text": "ADMIT", "color": "green", "index": 0},
+                "false": {"text": "REJECT", "color": "red", "index": 1},
+                "1": {"text": "ADMIT", "color": "green", "index": 2},
+                "0": {"text": "REJECT", "color": "red", "index": 3}
+              }
+            }
+          ],
+          "noValue": "UNKNOWN"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
+          "url_options": {"method": "GET"},
+          "root_selector": "",
+          "columns": [
+            {"selector": "hasAccess", "text": "hasAccess", "type": "string"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Rate Card — plan inference_payg (USD per token)",
+      "description": "Unit prices read live from the OpenMeter plan.",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto"}, "unit": "currencyUSD", "decimals": 4},
+        "overrides": []
+      },
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/plans/inference_payg",
+          "url_options": {"method": "GET"},
+          "root_selector": "phases.0.rateCards",
+          "columns": [
+            {"selector": "key", "text": "rate", "type": "string"},
+            {"selector": "name", "text": "description", "type": "string"},
+            {"selector": "price.amount", "text": "unit price", "type": "number"},
+            {"selector": "price.type", "text": "type", "type": "string"},
+            {"selector": "billingCadence", "text": "cadence", "type": "string"}
+          ]
+        }
+      ]
+    },
+    {
       "id": 1,
       "type": "bargauge",
       "title": "Tokens by subject",
       "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 14},
       "options": {
         "displayMode": "gradient",
         "orientation": "horizontal",
@@ -48,82 +233,11 @@
       ]
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "Remaining balance: ${subject}",
-      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
-      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "red", "value": null},
-              {"color": "green", "value": 1}
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "type": "json",
-          "source": "url",
-          "format": "table",
-          "parser": "backend",
-          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
-          "url_options": {"method": "GET"},
-          "root_selector": "",
-          "columns": [
-            {"selector": "balance", "text": "balance", "type": "number"}
-          ]
-        }
-      ]
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Usage this period: ${subject}",
-      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
-      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "colorMode": "value",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": {"unit": "short", "color": {"mode": "fixed", "fixedColor": "blue"}},
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "type": "json",
-          "source": "url",
-          "format": "table",
-          "parser": "backend",
-          "url": "/api/v1/customers/${subject}/entitlements/inference_tokens/value?model=",
-          "url_options": {"method": "GET"},
-          "root_selector": "",
-          "columns": [
-            {"selector": "usage", "text": "usage", "type": "number"}
-          ]
-        }
-      ]
-    },
-    {
       "id": 4,
       "type": "table",
       "title": "Entitlements",
       "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 14},
       "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
       "options": {"showHeader": true},
       "targets": [
@@ -150,7 +264,7 @@
       "type": "table",
       "title": "Recent usage events",
       "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 14},
       "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
       "options": {"showHeader": true, "sortBy": [{"displayName": "time", "desc": true}]},
       "targets": [
@@ -172,6 +286,274 @@
           ]
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Prompt tokens by model",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10000},
+              {"color": "red", "value": 100000}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_prompt/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "columns": [
+            {"selector": "subject", "text": "subject", "type": "string"},
+            {"selector": "groupBy.model", "text": "model", "type": "string"},
+            {"selector": "value", "text": "value", "type": "number"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Completion tokens by model",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10000},
+              {"color": "red", "value": 100000}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_completion/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "columns": [
+            {"selector": "subject", "text": "subject", "type": "string"},
+            {"selector": "groupBy.model", "text": "model", "type": "string"},
+            {"selector": "value", "text": "value", "type": "number"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Detail: ${subject} prompt opt-125m",
+      "description": "tokens x $0.0015 per token, rate from plan inference_payg",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 30},
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "text": {"valueSize": 30, "titleSize": 12}
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD", "decimals": 4},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_prompt/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "filterExpression": "subject == '${subject}' && groupBy.model == 'facebook/opt-125m'",
+          "columns": [
+            {"selector": "value", "text": "tokens", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "tokens", "operator": "*", "right": "0.0015"},
+            "alias": "cost_usd",
+            "replaceFields": true
+          }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Detail: ${subject} prompt Qwen3-0.6B",
+      "description": "tokens x $0.008 per token, rate from plan inference_payg",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 30},
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "text": {"valueSize": 30, "titleSize": 12}
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD", "decimals": 4},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_prompt/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "filterExpression": "subject == '${subject}' && groupBy.model == 'Qwen/Qwen3-0.6B'",
+          "columns": [
+            {"selector": "value", "text": "tokens", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "tokens", "operator": "*", "right": "0.008"},
+            "alias": "cost_usd",
+            "replaceFields": true
+          }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Detail: ${subject} completion opt-125m",
+      "description": "tokens x $0.002 per token, rate from plan inference_payg",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 30},
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "text": {"valueSize": 30, "titleSize": 12}
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD", "decimals": 4},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_completion/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "filterExpression": "subject == '${subject}' && groupBy.model == 'facebook/opt-125m'",
+          "columns": [
+            {"selector": "value", "text": "tokens", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "tokens", "operator": "*", "right": "0.002"},
+            "alias": "cost_usd",
+            "replaceFields": true
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Detail: ${subject} completion Qwen3-0.6B",
+      "description": "tokens x $0.01 per token, rate from plan inference_payg",
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "openmeter"},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 30},
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "text": {"valueSize": 30, "titleSize": 12}
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD", "decimals": 4},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/meters/tokens_completion/query?from=${__from:date:iso}&to=${__to:date:iso}&groupBy=subject&groupBy=model",
+          "url_options": {"method": "GET"},
+          "root_selector": "data",
+          "filterExpression": "subject == '${subject}' && groupBy.model == 'Qwen/Qwen3-0.6B'",
+          "columns": [
+            {"selector": "value", "text": "tokens", "type": "number"}
+          ]
+        }
+      ],
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binaryOp",
+            "binaryOperation": {"left": "tokens", "operator": "*", "right": "0.01"},
+            "alias": "cost_usd",
+            "replaceFields": true
+          }
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -188,7 +570,7 @@
       }
     ]
   },
-  "time": {"from": "now-24h", "to": "now"},
+  "time": {"from": "now-7d", "to": "now"},
   "timezone": "utc",
   "title": "OpenMeter usage",
   "uid": "openmeter-usage",
