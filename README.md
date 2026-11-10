@@ -9,6 +9,7 @@ This is **not** product code and is **not** a CI gate for [models-as-a-service](
 ## Start here
 
 - **[ADR 0001 — PoC plan](docs/adr/0001-metering-poc-openmeter-talkback.md)** — detailed architecture, Praxis evaluation gates, OpenMeter pricing model, talk-back contract, and phased delivery.
+- **[ADR 0002 — Envoy budget filter](docs/adr/0002-envoy-budget-filter.md)** — proposed post-Kuadrant Envoy filter that returns 402 when the authenticated user is over budget. Design only; not implemented.
 
 Product intent lives in `models-as-a-service` under `METERING_PROPOSAL/` (`overview.md`, `talkback.md`).
 

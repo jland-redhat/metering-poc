@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenMeter price editor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>OpenMeter price editor</h1>
+      <p class="meta">Plan <code id="plan-key">{{ plan_key }}</code>
+        &middot; active version <strong id="plan-version">&mdash;</strong>
+        &middot; <span id="plan-status">&mdash;</span></p>
+    </header>
+
+    <p id="banner" class="banner" hidden></p>
+
+    <table id="prices">
+      <thead>
+        <tr>
+          <th>Rate card</th>
+          <th>Meter</th>
+          <th>Model</th>
+          <th>Unit price</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="actions">
+      <button id="save" type="button">Save prices</button>
+      <button id="reset" type="button" class="secondary">Reset</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <section id="subs">
+      <h2>Subscriptions</h2>
+      <ul id="sub-list"></ul>
+    </section>
+
+    <footer>
+      <p>Changing a price creates the next plan version, publishes it and moves
+        active subscriptions onto it with immediate timing. Usage already
+        recorded is not re-priced.</p>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

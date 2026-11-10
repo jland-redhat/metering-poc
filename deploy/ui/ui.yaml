@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-price-editor
+  namespace: metering
+  labels:
+    app: openmeter-price-editor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-price-editor
+  template:
+    metadata:
+      labels:
+        app: openmeter-price-editor
+    spec:
+      containers:
+        - name: editor
+          image: quay.io/jland/maas-metering-poc:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OPENMETER_URL
+              value: http://openmeter-api.metering.svc.cluster.local:6443
+            - name: PLAN_KEY
+              value: inference_payg
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-price-editor
+  namespace: metering
+  labels:
+    app: openmeter-price-editor
+spec:
+  selector:
+    app: openmeter-price-editor
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: openmeter-price-editor
+  namespace: metering
+  labels:
+    app: openmeter-price-editor
+spec:
+  to:
+    kind: Service
+    name: openmeter-price-editor
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
