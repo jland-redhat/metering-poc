@@ -37,8 +37,11 @@ Four rate cards are used today:
 | `completion_qwen3` | `tokens_completion` | `Qwen/Qwen3-0.6B` | 0.01 |
 
 The unit price is a number in the plan currency; the meter value is a token
-count. The app never multiplies by 1000 or similar — a price of `0.002` means
-USD 0.002 per token.
+count. The app never multiplies by 1000 or similar internally — a price of
+`0.002` means USD 0.002 per token. The editor and the dashboard also show the
+same rate per 1k and per 1M tokens, because per-token numbers are easy to
+misread. Cost per request is just tokens used times the unit price, for example
+`10 × prompt rate + 16 × completion rate`.
 
 ## What "saving a price" does
 
@@ -100,8 +103,10 @@ returns:
 - `overage` — tokens used past the grants
 - `hasAccess` — whether the entitlement is still satisfied
 
-The Budgets table shows those values plus an estimated `Spent (USD)`, which is
-the subject's recorded usage priced at the active plan's current rates.
+The Budgets table shows those values plus `Spent (USD)`, which is the subject's
+usage in the **current usage period** priced at the active plan's current
+rates. It is not lifetime spend, so it moves with usage and balance and drops
+back to zero when the monthly period rolls over.
 
 Changing a budget uses the entitlement **override** endpoint:
 
@@ -139,9 +144,9 @@ subject crosses it.
 | `GET` | `/healthz` | Liveness/readiness probe |
 | `GET` | `/api/state` | Active plan, rate cards, subscriptions |
 | `POST` | `/api/prices` | Body `{"prices": {"<rateCardKey>": <amount>}}`; creates and publishes the next plan version |
-| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent |
+| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent and admission; optional `?subject=` filter |
 | `POST` | `/api/budgets` | Body `{"subject": "<subjectKey>", "tokens": <amount>}`; overrides the entitlement grant |
-| `GET` | `/api/costs?from=&to=` | Usage joined to prices; one row per subject/meter/model with `cost` |
+| `GET` | `/api/costs?from=&to=` | Usage joined to prices; one row per subject/meter/model with `cost`; optional `subject`, `meter` and `model` filters |
 
 All routes return `{"error": "..."}` with a non-2xx status on failure.
 

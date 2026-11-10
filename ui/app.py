@@ -107,6 +107,10 @@ def describe(plan, features):
             feature = features.get(card.get("featureKey"), {})
             price = card.get("price") or {}
             filters = feature.get("meterGroupByFilters") or {}
+            try:
+                amount = float(price.get("amount"))
+            except (TypeError, ValueError):
+                amount = None
             rows.append(
                 {
                     "key": card.get("key"),
@@ -116,6 +120,8 @@ def describe(plan, features):
                     "model": filters.get("model") or "(all models)",
                     "priceType": price.get("type"),
                     "amount": price.get("amount"),
+                    "per1k": round(amount * 1000, 6) if amount is not None else None,
+                    "per1m": round(amount * 1_000_000, 4) if amount is not None else None,
                 }
             )
     return rows
@@ -320,22 +326,39 @@ def entitlement_value(customer_ref, feature_key):
         return {}
 
 
+def period_start(ent):
+    """Return the start of the entitlement's current usage period as ISO."""
+    anchor = (ent.get("usagePeriod") or {}).get("anchor") or ent.get("measureUsageFrom")
+    return anchor or "1970-01-01T00:00:00Z"
+
+
 def budget_rows():
-    """Return one row per subject with a metered entitlement."""
+    """Return one row per subject with a metered entitlement.
+
+    Spend is priced over the current usage period, not all time, so it moves
+    with usage and balance. Meter history is not rewritten when a period
+    rolls over, hence the explicit start.
+    """
     features = features_by_key()
+    ents = [e for e in current_entitlements() if e.get("type") == "metered"]
+
     costs = {}
-    try:
-        for row in usage_costs("1970-01-01T00:00:00Z", "2100-01-01T00:00:00Z")["rows"]:
-            if row.get("cost") is not None:
-                costs[row["subject"]] = costs.get(row["subject"], 0) + row["cost"]
-    except OpenMeterError:
-        pass
+    starts = {period_start(e) for e in ents}
+    for start in starts:
+        try:
+            points = usage_costs(start, "2100-01-01T00:00:00Z")["rows"]
+        except OpenMeterError:
+            continue
+        for row in points:
+            if row.get("cost") is None:
+                continue
+            per_start = costs.setdefault(start, {})
+            subject = row["subject"]
+            per_start[subject] = per_start.get(subject, 0) + row["cost"]
 
     by_key = {c["key"]: c for c in customers()}
     rows = []
-    for ent in current_entitlements():
-        if ent.get("type") != "metered":
-            continue
+    for ent in ents:
         subject = ent.get("subjectKey")
         feature_key = ent.get("featureKey")
         customer = by_key.get(subject)
@@ -356,7 +379,9 @@ def budget_rows():
                 "balance": value.get("balance"),
                 "overage": value.get("overage"),
                 "hasAccess": value.get("hasAccess"),
-                "spent": round(costs.get(subject, 0), 8),
+                "admission": "ADMIT" if value.get("hasAccess") else "REJECT",
+                "spent": round(costs.get(period_start(ent), {}).get(subject, 0), 8),
+                "periodStart": period_start(ent),
                 "entitlementId": ent.get("id"),
                 "usagePeriod": ent.get("usagePeriod"),
             }
@@ -424,11 +449,14 @@ def set_budget(subject, amount):
     }
 
 
-def usage_costs(start, end):
+def usage_costs(start, end, subject=None, meter=None, model=None):
     """Combine meter usage with the active plan's unit prices.
 
     Returns one row per (customer, meter, model) with tokens and cost, so that
     a dashboard can show live spend without reimplementing price arithmetic.
+    The optional subject, meter and model arguments filter server side; remote
+    panels need this because the model names contain digits that a filter
+    expression parser cannot handle inside a quoted string.
     """
     plan = active_plan()
     features = features_by_key()
@@ -442,21 +470,27 @@ def usage_costs(start, end):
 
     rows = []
     for meter_slug in sorted({slug for slug, _ in rates}):
+        if meter and meter_slug != meter:
+            continue
         data = api(
             "GET",
             f"/api/v1/meters/{meter_slug}/query?from={start}&to={end}"
             "&groupBy=subject&groupBy=model",
         )
         for point in data.get("data", []) or []:
-            subject = point.get("subject")
-            model = (point.get("groupBy") or {}).get("model")
+            point_subject = point.get("subject")
+            point_model = (point.get("groupBy") or {}).get("model")
+            if subject and point_subject != subject:
+                continue
+            if model and point_model != model:
+                continue
             tokens = point.get("value") or 0
-            amount, card = rates.get((meter_slug, model), (None, None))
+            amount, card = rates.get((meter_slug, point_model), (None, None))
             rows.append(
                 {
-                    "subject": subject,
+                    "subject": point_subject,
                     "meter": meter_slug,
-                    "model": model or "(none)",
+                    "model": point_model or "(none)",
                     "tokens": tokens,
                     "unitPrice": amount,
                     "rateCard": card,
@@ -473,7 +507,15 @@ def costs():
     start = request.args.get("from", "1970-01-01T00:00:00Z")
     end = request.args.get("to", "2100-01-01T00:00:00Z")
     try:
-        return jsonify(usage_costs(start, end))
+        return jsonify(
+            usage_costs(
+                start,
+                end,
+                subject=request.args.get("subject"),
+                meter=request.args.get("meter"),
+                model=request.args.get("model"),
+            )
+        )
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
 
@@ -481,7 +523,11 @@ def costs():
 @app.get("/api/budgets")
 def budgets():
     try:
-        return jsonify({"rows": budget_rows()})
+        rows = budget_rows()
+        subject = request.args.get("subject")
+        if subject:
+            rows = [r for r in rows if r["subject"] == subject]
+        return jsonify({"rows": rows})
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
 

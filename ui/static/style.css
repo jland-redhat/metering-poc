@@ -112,7 +112,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .banner.ok { border-color: var(--ok); }
 
 button.small { padding: 4px 10px; font-size: 0.85rem; }
-#budget-table td { font-variant-numeric: tabular-nums; }
+#budget-table td, td.num { font-variant-numeric: tabular-nums; }
 .denied { color: var(--err); }
 
 #sub-list { padding-left: 20px; color: var(--muted); }

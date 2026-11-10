@@ -62,7 +62,15 @@ function render(data) {
     });
     price.append(input);
 
-    tr.append(name, meter, model, price);
+    const per1k = document.createElement("td");
+    per1k.className = "model num";
+    per1k.textContent = row.per1k == null ? "—" : `$${row.per1k}`;
+
+    const per1m = document.createElement("td");
+    per1m.className = "model num";
+    per1m.textContent = row.per1m == null ? "—" : `$${row.per1m}`;
+
+    tr.append(name, meter, model, price, per1k, per1m);
     body.append(tr);
   }
 
@@ -123,7 +131,6 @@ function renderBudgets(rows) {
     const spent = document.createElement("td");
     spent.className = "model";
     spent.textContent = row.spent == null ? "—" : `$${row.spent}`;
-
     const access = document.createElement("td");
     const badge = document.createElement("span");
     badge.textContent = row.hasAccess ? "allowed" : "cut off";

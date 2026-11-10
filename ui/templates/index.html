@@ -24,10 +24,16 @@
           <th>Meter</th>
           <th>Model</th>
           <th>Unit price</th>
+          <th>Per 1k tokens</th>
+          <th>Per 1M tokens</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
+
+    <p class="meta">Cost per request is tokens used times the unit price. A
+      request that bills 10 prompt and 16 completion tokens costs
+      <code>10 × prompt rate + 16 × completion rate</code>.</p>
 
     <div class="actions">
       <button id="save" type="button">Save prices</button>
