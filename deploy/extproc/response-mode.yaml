@@ -1,0 +1,110 @@
+# Let the pre-auth ExtProc see model responses so token_count can count tokens.
+#
+# The ai-gateway-controller renders the payload-processing EnvoyFilter with
+# ipp-pre running request hooks only (response_body_mode: NONE,
+# response_header_mode: SKIP). Model calls only traverse ipp-pre, so the token
+# count and the external_metering usage report never run. This EnvoyFilter is
+# applied after the controller's (priority 20 > 10) and merges response
+# buffering into ipp-pre.
+#
+# The controller does not own this object, so a gateway reconcile does not
+# remove it. Re-apply it after an upgrade that changes the ipp-pre definition.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: maas-metering-response-mode
+  namespace: openshift-ingress
+spec:
+  priority: 20
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: maas-default-gateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: extenstions.istio.io/wasmplugin/openshift-ingress.kuadrant-maas-default-gateway
+      patch:
+        operation: MERGE
+        value:
+          name: envoy.filters.http.ext_proc.ipp-pre
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            processing_mode:
+              request_body_mode: BUFFERED
+              request_header_mode: SEND
+              request_trailer_mode: SKIP
+              response_body_mode: BUFFERED
+              response_header_mode: SEND
+              response_trailer_mode: SKIP
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: extensions.istio.io/wasmplugin/openshift-ingress.kuadrant-maas-default-gateway
+      patch:
+        operation: MERGE
+        value:
+          name: envoy.filters.http.ext_proc.ipp-pre
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            processing_mode:
+              request_body_mode: BUFFERED
+              request_header_mode: SEND
+              request_trailer_mode: SKIP
+              response_body_mode: BUFFERED
+              response_header_mode: SEND
+              response_trailer_mode: SKIP
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: extensions.istio.io/trafficextension/openshift-ingress.kuadrant-maas-default-gateway~istio-translated-wasmplugin
+      patch:
+        operation: MERGE
+        value:
+          name: envoy.filters.http.ext_proc.ipp-pre
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            processing_mode:
+              request_body_mode: BUFFERED
+              request_header_mode: SEND
+              request_trailer_mode: SKIP
+              response_body_mode: BUFFERED
+              response_header_mode: SEND
+              response_trailer_mode: SKIP
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.wasm
+      patch:
+        operation: MERGE
+        value:
+          name: envoy.filters.http.ext_proc.ipp-pre
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            processing_mode:
+              request_body_mode: BUFFERED
+              request_header_mode: SEND
+              request_trailer_mode: SKIP
+              response_body_mode: BUFFERED
+              response_header_mode: SEND
+              response_trailer_mode: SKIP

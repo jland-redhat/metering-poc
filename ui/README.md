@@ -93,20 +93,104 @@ traffic as `cluster_admin`.
 
 ## Budgets: the cut-off point
 
-Each subject with a metered entitlement has a token budget. The budget is the
-sum of the entitlement's active **grants**. OpenMeter burns the grant down as
-usage is metered, and `GET /api/v1/customers/{id}/entitlements/{feature}/value`
+Each subject with a metered entitlement has a budget. The budget is the sum of
+the entitlement's active **grants**. OpenMeter burns the grant down as usage is
+metered, and `GET /api/v1/customers/{id}/entitlements/{feature}/value`
 returns:
 
-- `usage` — tokens consumed in the current period
-- `balance` — tokens left across active grants
-- `overage` — tokens used past the grants
+- `usage` — units consumed in the current period
+- `balance` — units left across active grants
+- `overage` — units used past the grants
 - `hasAccess` — whether the entitlement is still satisfied
 
-The Budgets table shows those values plus `Spent (USD)`, which is the subject's
-usage in the **current usage period** priced at the active plan's current
-rates. It is not lifetime spend, so it moves with usage and balance and drops
-back to zero when the monthly period rolls over.
+Two entitlements are supported:
+
+| Feature | Meter | Unit | Grant means |
+| --- | --- | --- | --- |
+| `inference_tokens` | `tokens_total` (`SUM($.total_tokens)`) | tokens | tokens allowed |
+| `inference_cost` | `cost_usd` (`SUM($.cost)`) | USD | dollars allowed |
+
+The Budgets table shows both, with the unit under each amount. `Spent (USD)`
+is the subject's usage in the **current usage period** priced at the active
+plan's current rates. It is not lifetime spend, so it moves with usage and
+balance and drops back to zero when the monthly period rolls over. For a
+dollar entitlement, `usage` already is spend, so the table shows that value.
+
+## Dollar budgets
+
+OpenMeter grants accept decimals: `issueAfterReset: 50.00` on a meter that
+sums dollars gives a real USD budget (`balance: 50`, `hasAccess` until spend
+reaches it). The gap is that the MaaS gateway reports **tokens only** — its
+`inference.tokens.used` events carry `prompt_tokens`, `completion_tokens`,
+`total_tokens` and `model`, but no price — and the `external_metering` filter
+has no pricing support, so it cannot emit a cost.
+
+This app closes the gap with a metering relay:
+
+```
+gateway ExtProc external_metering
+    → POST {metering_url}/api/v1/customers/.../value   balance check (proxied)
+    → POST {metering_url}/api/v1/events                usage report (priced)
+        → openmeter-metering-proxy (this app, /meter and passthrough)
+            → looks up the active plan's per-token prices for the model
+            → adds data.cost = prompt_tokens × prompt rate
+                               + completion_tokens × completion rate
+            → forwards the event to OpenMeter
+                → tokens_total meter  (tokens, unchanged)
+                → cost_usd meter      ($.cost, new)
+```
+
+Every other method and path is proxied to OpenMeter unchanged, so the filter's
+balance check and any other OpenMeter call pass through.
+
+Set the relay as the filter's metering URL and seed a dollar entitlement:
+
+```bash
+./scripts/enable-maas-metering.sh --chain bbr --key pre-extproc.yaml \
+  --url http://openmeter-metering-proxy.metering.svc.cluster.local:6443
+./scripts/set-balance.sh --user cluster_admin --dollars 50
+```
+
+Verified end to end in this PoC: a request billing 10 prompt and 16 completion
+tokens on `facebook/opt-125m` produces `cost: 0.047` at the relay, and the
+subject's dollar entitlement drops from 5.00 to 4.76 after a
+`Qwen/Qwen3-0.6B` request of the same size.
+
+Limits of this approach:
+
+- The relay prices with the **current** plan rates, at event delivery time.
+  History is not re-priced, but a rate change applies to events delivered
+  after it.
+- A model with no matching rate card produces no `cost` and does not burn the
+  dollar budget, while its tokens still count.
+- The gateway load-balances calls through `payload-pre-processing`, whose
+  request-only ExtProc mode hides responses, so `token_count` never sees
+  usage. [deploy/extproc/response-mode.yaml](../deploy/extproc/response-mode.yaml)
+  merges response buffering into that ExtProc. Without it the balance check
+  runs but no usage event is reported.
+- Both changes live in objects the ai-gateway-controller renders or manages;
+  re-run the scripts and re-apply the EnvoyFilter after a gateway reconcile or
+  upgrade.
+
+### The best solution
+
+The relay is a PoC workaround, not the shape this should take in a product.
+The clean design puts pricing where the event is produced:
+
+1. **Price in the gateway metering filter.** Give `external_metering` a price
+   table (or a price lookup URL) so the usage CloudEvent carries
+   `cost` natively, priced at the moment the response is parsed. One event,
+   one writer, no proxy in the delivery path and no second network hop.
+2. **Meter the cost, not the tokens, for billing.** Keep the token meters for
+   reporting, but make the plan's entitlement and rate cards consume the cost
+   meter so budget, invoice and dashboard all agree on one number.
+3. **Enforce in the gateway, on the same number.** The budget filter from
+   [ADR 0002](../docs/adr/0002-envoy-budget-filter.md) should read the same
+   entitlement the balance check reads and return 402/429 at the boundary.
+   Today admissions are advisory only.
+
+Until (1) exists, the relay is the smallest change that shows a dollar budget
+cutting off real traffic.
 
 Changing a budget uses the entitlement **override** endpoint:
 
@@ -144,9 +228,11 @@ subject crosses it.
 | `GET` | `/healthz` | Liveness/readiness probe |
 | `GET` | `/api/state` | Active plan, rate cards, subscriptions |
 | `POST` | `/api/prices` | Body `{"prices": {"<rateCardKey>": <amount>}}`; creates and publishes the next plan version |
-| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent and admission; optional `?subject=` filter |
-| `POST` | `/api/budgets` | Body `{"subject": "<subjectKey>", "tokens": <amount>}`; overrides the entitlement grant |
+| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent, unit and admission; optional `?subject=` filter and `?summary=1` for a single ADMIT/REJECT value |
+| `POST` | `/api/budgets` | Body `{"subject": "<subjectKey>", "featureKey": "<feature>", "amount": <grant>}`; overrides the entitlement grant |
 | `GET` | `/api/costs?from=&to=` | Usage joined to prices; one row per subject/meter/model with `cost`; optional `subject`, `meter` and `model` filters |
+| `POST` | `/meter` | Metering relay: prices one usage CloudEvent and forwards it to OpenMeter |
+| `*` | `/<path>` | Any other path proxied to OpenMeter unchanged (the filter's balance check) |
 
 All routes return `{"error": "..."}` with a non-2xx status on failure.
 
@@ -182,7 +268,13 @@ podman build -t quay.io/jland/maas-metering-poc:v1 .
 podman push quay.io/jland/maas-metering-poc:v1
 oc apply -f ../deploy/ui/ui.yaml
 oc rollout status deploy/openmeter-price-editor -n metering
+oc rollout status deploy/openmeter-metering-proxy -n metering
 ```
+
+The same image runs twice: `openmeter-price-editor` serves the page, and
+`openmeter-metering-proxy` is the metering relay on port 6443 (the only ports
+the gateway ExtProc NetworkPolicy allows; OVN matches the policy after service
+DNAT, so the container must listen on the allowed port itself).
 
 The Deployment runs as UID 1001 with a restricted security context, exposes
 `/healthz` for probes, and is fronted by an edge Route:
@@ -197,11 +289,11 @@ restart.
 
 ## Known gaps
 
-- **No dollar-denominated cap.** Budgets are token counts, because that is what
-  OpenMeter grants. A dollar cap would need a conversion rule per model and an
-  enforcement point that prices usage as it arrives.
+- **Dollar budgets need the relay.** OpenMeter meters a `cost` field, but the
+  gateway does not emit one. The relay in this app supplies it; a product
+  should price inside the metering filter instead (see "The best solution").
 - **No enforcement.** See ADR 0002. The ExtProc filter that would return 402 is
-  not implemented.
+  not implemented, so an exhausted budget is reported, not applied.
 - **No invoices.** The `openmeter-jobs` binary is missing from the
   `v1.0.0-beta.213` image, so billing CronJobs cannot run. Spend in this app and
   in Grafana is computed on read.

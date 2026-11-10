@@ -43,16 +43,17 @@
 
     <section id="budgets">
       <h2>Budgets (cut-off point)</h2>
-      <p class="meta">A subject can use tokens until its grant runs out. Setting a
+      <p class="meta">A subject can use its grant until it runs out. Setting a
         budget replaces the grant; the entitlement reports
-        <code>hasAccess: false</code> once usage passes it. Spent is the value
-        of recorded usage at current prices.</p>
+        <code>hasAccess: false</code> once usage passes it. Token budgets cut
+        off on tokens; a <code>USD</code> budget cuts off on dollars, because
+        that entitlement meters the priced cost of each request.</p>
       <table id="budget-table">
         <thead>
           <tr>
             <th>Subject</th>
             <th>Usage</th>
-            <th>Budget (tokens)</th>
+            <th>Budget</th>
             <th>Balance</th>
             <th>Spent (USD)</th>
             <th>Access</th>

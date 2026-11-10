@@ -110,23 +110,34 @@ function renderBudgets(rows) {
       subject.append(key);
     }
 
+    const isUsd = row.unit === "USD";
+    const fmt = (v) => (v == null ? "—" : isUsd ? `$${Number(v).toFixed(4)}` : v);
+
     const usage = document.createElement("td");
     usage.className = "model";
-    usage.textContent = row.usage ?? "—";
+    usage.textContent = fmt(row.usage);
 
     const budget = document.createElement("td");
     const input = document.createElement("input");
     input.type = "number";
     input.min = "0";
-    input.step = "1";
+    input.step = isUsd ? "0.01" : "1";
     input.value = row.budget ?? "";
     input.dataset.subject = row.subject;
-    input.setAttribute("aria-label", `Token budget for ${row.subject}`);
+    input.setAttribute(
+      "aria-label",
+      `Budget for ${row.subject} in ${row.unit || "tokens"}`,
+    );
     budget.append(input);
+
+    const unit = document.createElement("div");
+    unit.className = "model";
+    unit.textContent = row.unit || "tokens";
+    budget.append(unit);
 
     const balance = document.createElement("td");
     balance.className = "model";
-    balance.textContent = row.balance ?? "—";
+    balance.textContent = fmt(row.balance);
 
     const spent = document.createElement("td");
     spent.className = "model";
@@ -142,7 +153,9 @@ function renderBudgets(rows) {
     save.type = "button";
     save.className = "secondary small";
     save.textContent = "Save budget";
-    save.addEventListener("click", () => saveBudget(row.subject, input, save));
+    save.addEventListener("click", () =>
+      saveBudget(row.subject, row.featureKey, row.unit, input, save),
+    );
     action.append(save);
 
     tr.append(subject, usage, budget, balance, spent, access, action);
@@ -170,20 +183,21 @@ async function loadBudgets() {
   }
 }
 
-async function saveBudget(subject, input, button) {
+async function saveBudget(subject, featureKey, unit, input, button) {
   button.disabled = true;
   banner("");
   try {
     const res = await fetch("/api/budgets", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ subject, tokens: input.value }),
+      body: JSON.stringify({ subject, featureKey, amount: input.value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const label = unit === "USD" ? "$" : "";
     banner(
       data.changed
-        ? `Budget for ${subject}: ${data.oldBudget} → ${data.newBudget} tokens.`
+        ? `Budget for ${subject} (${featureKey}): ${label}${data.oldBudget} → ${label}${data.newBudget}.`
         : data.message,
       data.changed ? "ok" : "",
     );

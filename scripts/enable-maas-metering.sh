@@ -13,10 +13,17 @@
 # Re-run this script after gateway or tenant changes.
 #
 # Usage:
-#   ./scripts/enable-maas-metering.sh [--url http://openmeter-api.metering.svc.cluster.local:6443]
+#   ./scripts/enable-maas-metering.sh [--url http://openmeter-metering-proxy.metering.svc.cluster.local:443/meter]
 #                                     [--feature inference_tokens]
-#                                     [--chain ipp]
+#                                     [--chain ipp] [--key extproc.yaml]
 #                                     [--default-username cluster_admin]
+#
+# There are two ExtProc chains. Model calls are handled by the pre-auth
+# "bbr" chain in pre-extproc.yaml (body-based routing); the post-auth "ipp"
+# chain in extproc.yaml handles the other paths. Run once per pair:
+#   ./scripts/enable-maas-metering.sh                      # ipp / extproc.yaml
+#   ./scripts/enable-maas-metering.sh --chain bbr \
+#       --key pre-extproc.yaml                             # model calls
 
 set -euo pipefail
 
@@ -24,6 +31,7 @@ NAMESPACE="${NAMESPACE:-openshift-ingress}"
 CONFIGMAP="${CONFIGMAP:-payload-processing-plugins}"
 DEPLOYMENT="${DEPLOYMENT:-payload-processing}"
 CHAIN_NAME="${CHAIN_NAME:-ipp}"
+CONFIG_KEY="${CONFIG_KEY:-extproc.yaml}"
 # Port 6443, not 80/443: the payload-processing NetworkPolicy only allows DNS
 # and TCP 443/6443 egress, and OVN applies the policy after service DNAT, so
 # port 80 would be blocked once translated to the pod port.
@@ -39,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --url) METERING_URL="$2"; shift 2 ;;
     --feature) FEATURE_KEY="$2"; shift 2 ;;
     --chain) CHAIN_NAME="$2"; shift 2 ;;
+    --key) CONFIG_KEY="$2"; shift 2 ;;
     --default-username) DEFAULT_USERNAME="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -47,11 +56,12 @@ done
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
-oc get configmap "${CONFIGMAP}" -n "${NAMESPACE}" -o jsonpath='{.data.extproc\.yaml}' > "${WORKDIR}/extproc.yaml"
+oc get configmap "${CONFIGMAP}" -n "${NAMESPACE}" \
+  -o jsonpath="{.data.${CONFIG_KEY//./\\.}}" > "${WORKDIR}/${CONFIG_KEY}"
 
 METERING_URL="${METERING_URL}" FEATURE_KEY="${FEATURE_KEY}" SOURCE_NAME="${SOURCE_NAME}" \
 CHAIN_NAME="${CHAIN_NAME}" DEFAULT_USERNAME="${DEFAULT_USERNAME}" \
-python3 - "${WORKDIR}/extproc.yaml" > "${WORKDIR}/extproc-metered.yaml" <<'PY'
+python3 - "${WORKDIR}/${CONFIG_KEY}" > "${WORKDIR}/extproc-metered.yaml" <<'PY'
 import os
 import sys
 
@@ -118,17 +128,25 @@ if not out[-1]:
 print("\n".join(out))
 PY
 
-python3 - "${WORKDIR}/extproc-metered.yaml" > "${WORKDIR}/patch.json" <<'PY'
+python3 - "${WORKDIR}/extproc-metered.yaml" "${CONFIG_KEY}" > "${WORKDIR}/patch.json" <<'PY'
 import json
 import sys
 
+key = sys.argv[2]
 updated = open(sys.argv[1], encoding="utf-8").read()
-print(json.dumps({"data": {"extproc.yaml": updated}}))
+print(json.dumps({"data": {key: updated}}))
 PY
 
 oc patch configmap "${CONFIGMAP}" -n "${NAMESPACE}" --type merge -p "$(cat "${WORKDIR}/patch.json")"
 
+# pre-extproc.yaml is served by payload-pre-processing; extproc.yaml by
+# payload-processing.
+case "${CONFIG_KEY}" in
+  pre-*) DEPLOYMENT="payload-pre-processing" ;;
+  *) DEPLOYMENT="${DEPLOYMENT}" ;;
+esac
+
 oc rollout restart "deployment/${DEPLOYMENT}" -n "${NAMESPACE}"
 oc rollout status "deployment/${DEPLOYMENT}" -n "${NAMESPACE}" --timeout=180s
 
-echo "external_metering enabled; metering_url=${METERING_URL} feature=${FEATURE_KEY}"
+echo "external_metering enabled on ${CONFIG_KEY} (${CHAIN_NAME}); metering_url=${METERING_URL} feature=${FEATURE_KEY}"

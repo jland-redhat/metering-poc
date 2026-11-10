@@ -199,11 +199,10 @@
      "source": "url",
      "format": "table",
      "parser": "backend",
-     "url": "/api/budgets?subject=${subject}",
+     "url": "/api/budgets?subject=${subject}&summary=1",
      "url_options": {
       "method": "GET"
      },
-     "root_selector": "rows",
      "columns": [
       {
        "selector": "admission",

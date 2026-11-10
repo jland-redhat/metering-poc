@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Set a MaaS user's OpenMeter token balance for the demo.
+# Set a MaaS user's OpenMeter budget for the demo.
 #
 # Usage:
 #   ./scripts/set-balance.sh
 #   ./scripts/set-balance.sh --user cluster_admin --tokens 50
+#   ./scripts/set-balance.sh --user cluster_admin --dollars 25.00
 #
 # The script ensures the customer, meter, feature and metered entitlement exist,
-# then replaces the subject's inference_tokens entitlement with one that issues
-# --tokens, and resets its usage period as of now. The reset is what zeroes the
+# then replaces the subject's entitlement with one that issues the requested
+# grant, and resets its usage period as of now. The reset is what zeroes the
 # usage already counted in the month, so the value endpoint reports
-# balance == --tokens and hasAccess == true right after the run.
+# balance == the grant and hasAccess == true right after the run.
+#
+# Token mode uses the inference_tokens feature (tokens_total meter). Dollar
+# mode uses the inference_cost feature (cost_usd meter), which counts the cost
+# field that the metering relay adds to each gateway event.
 #
 # It port-forwards svc/openmeter-api, so it only needs a valid oc session.
 
@@ -19,21 +24,59 @@ NAMESPACE="${NAMESPACE:-metering}"
 LOCAL_PORT="${LOCAL_PORT:-48888}"
 USER_NAME="${USER_NAME:-cluster_admin}"
 TOKENS="${TOKENS:-50}"
-FEATURE_KEY="inference_tokens"
+MODE="tokens"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --user) USER_NAME="$2"; shift 2 ;;
-    --tokens) TOKENS="$2"; shift 2 ;;
+    --tokens) TOKENS="$2"; MODE="tokens"; shift 2 ;;
+    --dollars) TOKENS="$2"; MODE="dollars"; shift 2 ;;
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --local-port) LOCAL_PORT="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-if [[ ! "${TOKENS}" =~ ^[0-9]+$ || "${TOKENS}" -eq 0 ]]; then
-  echo "--tokens must be a positive integer" >&2
-  exit 2
+if [[ "${MODE}" == "dollars" ]]; then
+  FEATURE_KEY="inference_cost"
+  METER_SLUG="cost_usd"
+  METER_JSON='{
+  "slug": "cost_usd",
+  "name": "Inference cost",
+  "description": "Priced cost in USD of each gateway request",
+  "aggregation": "SUM",
+  "eventType": "inference.tokens.used",
+  "valueProperty": "$.cost"
+}'
+  FEATURE_JSON="{
+  \"key\": \"${FEATURE_KEY}\",
+  \"name\": \"Inference cost (USD)\",
+  \"meterSlug\": \"cost_usd\"
+}"
+  if [[ ! "${TOKENS}" =~ ^[0-9]+([.][0-9]+)?$ || "${TOKENS}" =~ ^0+([.]0+)?$ ]]; then
+    echo "--dollars must be a positive number" >&2
+    exit 2
+  fi
+else
+  FEATURE_KEY="inference_tokens"
+  METER_SLUG="tokens_total"
+  METER_JSON='{
+  "slug": "tokens_total",
+  "name": "Inference tokens",
+  "description": "Total tokens reported by the AI gateway",
+  "aggregation": "SUM",
+  "eventType": "inference.tokens.used",
+  "valueProperty": "$.total_tokens"
+}'
+  FEATURE_JSON="{
+  \"key\": \"${FEATURE_KEY}\",
+  \"name\": \"Inference tokens\",
+  \"meterSlug\": \"tokens_total\"
+}"
+  if [[ ! "${TOKENS}" =~ ^[0-9]+$ || "${TOKENS}" -eq 0 ]]; then
+    echo "--tokens must be a positive integer" >&2
+    exit 2
+  fi
 fi
 
 if [[ ! "${USER_NAME}" =~ ^[a-z0-9]+(_[a-z0-9]+)*$ ]]; then
@@ -89,19 +132,8 @@ request() {
 }
 
 # Meter and feature are idempotent prerequisites; ignore "already exists".
-curl -sS -o /dev/null -X POST "${API}/api/v1/meters" -H 'Content-Type: application/json' -d '{
-  "slug": "tokens_total",
-  "name": "Inference tokens",
-  "description": "Total tokens reported by the AI gateway",
-  "aggregation": "SUM",
-  "eventType": "inference.tokens.used",
-  "valueProperty": "$.total_tokens"
-}' || true
-curl -sS -o /dev/null -X POST "${API}/api/v1/features" -H 'Content-Type: application/json' -d "{
-  \"key\": \"${FEATURE_KEY}\",
-  \"name\": \"Inference tokens\",
-  \"meterSlug\": \"tokens_total\"
-}" || true
+curl -sS -o /dev/null -X POST "${API}/api/v1/meters" -H 'Content-Type: application/json' -d "${METER_JSON}" || true
+curl -sS -o /dev/null -X POST "${API}/api/v1/features" -H 'Content-Type: application/json' -d "${FEATURE_JSON}" || true
 
 # Customer must exist before the entitlement. 404 means create it.
 CUSTOMER_CODE=$(curl -sS -o "${RESP_FILE}" -w '%{http_code}' "${API}/api/v1/customers/${USER_NAME}")
@@ -130,7 +162,11 @@ for id in ${EXISTING_IDS}; do
   request DELETE "/api/v1/subjects/${USER_NAME}/entitlements/${id}" >/dev/null
 done
 
-echo "Creating entitlement for ${USER_NAME} with balance ${TOKENS}"
+if [[ "${MODE}" == "dollars" ]]; then
+  echo "Creating entitlement for ${USER_NAME} with balance \$${TOKENS}"
+else
+  echo "Creating entitlement for ${USER_NAME} with balance ${TOKENS} tokens"
+fi
 request POST "/api/v1/subjects/${USER_NAME}/entitlements" "{
   \"type\": \"metered\",
   \"featureKey\": \"${FEATURE_KEY}\",

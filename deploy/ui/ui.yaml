@@ -66,6 +66,80 @@ spec:
       port: 8080
       targetPort: http
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-metering-proxy
+  namespace: metering
+  labels:
+    app: openmeter-metering-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-metering-proxy
+  template:
+    metadata:
+      labels:
+        app: openmeter-metering-proxy
+    spec:
+      containers:
+        - name: proxy
+          image: quay.io/jland/maas-metering-poc:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 6443
+          env:
+            - name: OPENMETER_URL
+              value: http://openmeter-api.metering.svc.cluster.local:6443
+            - name: PLAN_KEY
+              value: inference_payg
+            - name: PORT
+              value: "6443"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-metering-proxy
+  namespace: metering
+  labels:
+    app: openmeter-metering-proxy
+spec:
+  selector:
+    app: openmeter-metering-proxy
+  ports:
+    # Port 6443 because the gateway ExtProc NetworkPolicy allows egress only on
+    # 443 and 6443, and OVN matches the policy after service DNAT, so the
+    # container itself must listen on the allowed port. 6443 is also bindable
+    # as non-root. The traffic is plain HTTP.
+    - name: http
+      port: 6443
+      targetPort: http
+---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

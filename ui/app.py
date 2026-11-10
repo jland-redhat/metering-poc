@@ -23,6 +23,10 @@ OPENMETER_URL = os.environ.get(
 PLAN_KEY = os.environ.get("PLAN_KEY", "inference_payg")
 CUSTOMER_KEY = os.environ.get("CUSTOMER_KEY", "")
 PORT = int(os.environ.get("PORT", "8080"))
+# Meter and feature that carry a dollar amount per request. The gateway sends
+# tokens only, so a relay route prices each event before it reaches OpenMeter.
+COST_METER = os.environ.get("COST_METER", "cost_usd")
+COST_FEATURE = os.environ.get("COST_FEATURE", "inference_cost")
 
 app = Flask(__name__)
 
@@ -368,19 +372,25 @@ def budget_rows():
         except OpenMeterError:
             budget = None
         usage = value.get("usage")
+        feature = features.get(feature_key) or {}
+        is_cost = feature.get("meterSlug") == COST_METER
+        spent = round(costs.get(period_start(ent), {}).get(subject, 0), 8)
         rows.append(
             {
                 "subject": subject,
                 "customer": customer.get("id") if customer else None,
                 "featureKey": feature_key,
-                "featureName": (features.get(feature_key) or {}).get("name"),
+                "featureName": feature.get("name"),
+                "meter": feature.get("meterSlug"),
+                "unit": "USD" if is_cost else "tokens",
                 "budget": budget,
                 "usage": usage,
                 "balance": value.get("balance"),
                 "overage": value.get("overage"),
                 "hasAccess": value.get("hasAccess"),
                 "admission": "ADMIT" if value.get("hasAccess") else "REJECT",
-                "spent": round(costs.get(period_start(ent), {}).get(subject, 0), 8),
+                # A dollar entitlement's usage already is its spend.
+                "spent": round(usage, 8) if (is_cost and usage is not None) else spent,
                 "periodStart": period_start(ent),
                 "entitlementId": ent.get("id"),
                 "usagePeriod": ent.get("usagePeriod"),
@@ -390,14 +400,15 @@ def budget_rows():
     return rows
 
 
-def set_budget(subject, amount):
+def set_budget(subject, amount, feature_key=None):
     """Replace a subject's entitlement budget.
 
     OpenMeter grants are immutable, so the supported way to change a budget
     is to override the entitlement: a new entitlement is created with the new
     issueAfterReset grant and the old one is closed by setting activeTo. The
     usage period anchor and measureUsageFrom are copied so recorded usage is
-    preserved.
+    preserved. When feature_key is given, that entitlement is targeted; a
+    subject can hold both a token budget and a dollar budget.
     """
     if not subject:
         raise OpenMeterError("subject is required", 400)
@@ -412,7 +423,9 @@ def set_budget(subject, amount):
         (
             e
             for e in current_entitlements()
-            if e.get("subjectKey") == subject and e.get("type") == "metered"
+            if e.get("subjectKey") == subject
+            and e.get("type") == "metered"
+            and (feature_key is None or e.get("featureKey") == feature_key)
         ),
         None,
     )
@@ -447,6 +460,107 @@ def set_budget(subject, amount):
         "newBudget": value,
         "entitlementId": created.get("id"),
     }
+
+
+def unit_rates():
+    """Return {(meterSlug, model): USD per token} from the active plan."""
+    rates = {}
+    for row in describe(active_plan(), features_by_key()):
+        try:
+            rates[(row["meterSlug"], row["model"])] = float(row["amount"])
+        except (TypeError, ValueError):
+            continue
+    return rates
+
+
+def event_cost(event, rates):
+    """Price one usage event.
+
+    Returns None when the event carries no model or no matching rate card, so
+    the relay forwards the event untouched rather than reporting a wrong cost.
+    """
+    data = event.get("data") or {}
+    model = data.get("model")
+    if not model:
+        return None
+    prompt = float(data.get("prompt_tokens") or 0)
+    completion = float(data.get("completion_tokens") or 0)
+    prompt_rate = rates.get(("tokens_prompt", model))
+    completion_rate = rates.get(("tokens_completion", model))
+    if prompt_rate is None or completion_rate is None:
+        return None
+    return round(prompt * prompt_rate + completion * completion_rate, 10)
+
+
+@app.post("/meter")
+def meter():
+    """Relay a gateway usage CloudEvent, adding a priced `cost` field.
+
+    The MaaS gateway reports prompt and completion token counts but has no
+    pricing, so it cannot feed a dollar meter. Point the external_metering
+    filter's metering_url here instead of at OpenMeter: this route prices the
+    event with the active plan and forwards it, so the same event feeds both
+    the token meters and the cost meter.
+    """
+    event = request.get_json(silent=True)
+    if not isinstance(event, dict):
+        return jsonify({"error": "body must be a JSON CloudEvent"}), 400
+    return forward_event(event)
+
+
+def forward_event(event):
+    try:
+        cost = event_cost(event, unit_rates())
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+    if cost is not None:
+        event.setdefault("data", {})["cost"] = cost
+        event["data"]["cost_currency"] = "USD"
+    try:
+        resp = requests.post(
+            f"{OPENMETER_URL}/api/v1/events", json=event, timeout=15
+        )
+    except requests.RequestException as exc:
+        raise OpenMeterError(f"cannot reach OpenMeter at {OPENMETER_URL}: {exc}") from exc
+    if resp.status_code >= 400:
+        return jsonify({"error": resp.text[:500], "cost": cost}), 502
+    return jsonify({"forwarded": True, "subject": event.get("subject"), "cost": cost})
+
+
+@app.route("/api/v1/events", methods=["POST"])
+def events():
+    """Price and forward events sent to the OpenMeter path directly."""
+    event = request.get_json(silent=True)
+    if not isinstance(event, dict):
+        return jsonify({"error": "body must be a JSON CloudEvent"}), 400
+    return forward_event(event)
+
+
+@app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
+def passthrough(path):
+    """Forward every other OpenMeter API call unchanged.
+
+    The external_metering filter checks the subject's balance before a
+    request and reports usage after it. Only the usage report needs pricing,
+    so the balance lookup and any other call are proxied as-is.
+    """
+    url = f"{OPENMETER_URL}/{path}"
+    try:
+        resp = requests.request(
+            request.method,
+            url,
+            params=request.args,
+            data=request.get_data(),
+            headers={"content-type": request.headers.get("content-type", "application/json")},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        raise OpenMeterError(f"cannot reach OpenMeter at {OPENMETER_URL}: {exc}") from exc
+    return (
+        resp.content,
+        resp.status_code,
+        {"content-type": resp.headers.get("content-type", "application/json")},
+    )
 
 
 def usage_costs(start, end, subject=None, meter=None, model=None):
@@ -527,6 +641,13 @@ def budgets():
         subject = request.args.get("subject")
         if subject:
             rows = [r for r in rows if r["subject"] == subject]
+        if request.args.get("summary"):
+            # One value for a Grafana stat panel: a subject is admitted only
+            # when every entitlement it holds still reports hasAccess.
+            admitted = all(r.get("hasAccess") for r in rows) if rows else None
+            return jsonify(
+                {"admission": "NO DATA" if admitted is None else ("ADMIT" if admitted else "REJECT")}
+            )
         return jsonify({"rows": rows})
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
@@ -536,9 +657,9 @@ def budgets():
 def update_budget():
     payload = request.get_json(silent=True) or {}
     subject = payload.get("subject")
-    amount = payload.get("tokens")
+    amount = payload.get("amount", payload.get("tokens"))
     try:
-        result = set_budget(subject, amount)
+        result = set_budget(subject, amount, payload.get("featureKey"))
         return jsonify(result)
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
