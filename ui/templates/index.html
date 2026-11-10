@@ -35,6 +35,28 @@
       <span id="status" class="status"></span>
     </div>
 
+    <section id="budgets">
+      <h2>Budgets (cut-off point)</h2>
+      <p class="meta">A subject can use tokens until its grant runs out. Setting a
+        budget replaces the grant; the entitlement reports
+        <code>hasAccess: false</code> once usage passes it. Spent is the value
+        of recorded usage at current prices.</p>
+      <table id="budget-table">
+        <thead>
+          <tr>
+            <th>Subject</th>
+            <th>Usage</th>
+            <th>Budget (tokens)</th>
+            <th>Balance</th>
+            <th>Spent (USD)</th>
+            <th>Access</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
     <section id="subs">
       <h2>Subscriptions</h2>
       <ul id="sub-list"></ul>

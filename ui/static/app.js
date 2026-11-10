@@ -84,6 +84,110 @@ function render(data) {
   }
 }
 
+function renderBudgets(rows) {
+  const body = $("#budget-table tbody");
+  body.replaceChildren();
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+
+    const subject = document.createElement("td");
+    const strong = document.createElement("strong");
+    strong.textContent = row.subject;
+    subject.append(strong);
+    if (row.featureKey) {
+      const key = document.createElement("div");
+      key.className = "model";
+      key.textContent = row.featureKey;
+      subject.append(key);
+    }
+
+    const usage = document.createElement("td");
+    usage.className = "model";
+    usage.textContent = row.usage ?? "—";
+
+    const budget = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.value = row.budget ?? "";
+    input.dataset.subject = row.subject;
+    input.setAttribute("aria-label", `Token budget for ${row.subject}`);
+    budget.append(input);
+
+    const balance = document.createElement("td");
+    balance.className = "model";
+    balance.textContent = row.balance ?? "—";
+
+    const spent = document.createElement("td");
+    spent.className = "model";
+    spent.textContent = row.spent == null ? "—" : `$${row.spent}`;
+
+    const access = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.textContent = row.hasAccess ? "allowed" : "cut off";
+    badge.className = row.hasAccess ? "active" : "denied";
+    access.append(badge);
+
+    const action = document.createElement("td");
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "secondary small";
+    save.textContent = "Save budget";
+    save.addEventListener("click", () => saveBudget(row.subject, input, save));
+    action.append(save);
+
+    tr.append(subject, usage, budget, balance, spent, access, action);
+    body.append(tr);
+  }
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = "No metered entitlements found.";
+    tr.append(td);
+    body.append(tr);
+  }
+}
+
+async function loadBudgets() {
+  try {
+    const res = await fetch("/api/budgets");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderBudgets(data.rows);
+  } catch (err) {
+    banner(`Could not load budgets: ${err.message}`, "err");
+  }
+}
+
+async function saveBudget(subject, input, button) {
+  button.disabled = true;
+  banner("");
+  try {
+    const res = await fetch("/api/budgets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, tokens: input.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    banner(
+      data.changed
+        ? `Budget for ${subject}: ${data.oldBudget} → ${data.newBudget} tokens.`
+        : data.message,
+      data.changed ? "ok" : "",
+    );
+    await loadBudgets();
+  } catch (err) {
+    banner(`Budget change failed: ${err.message}`, "err");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function load() {
   setStatus("Loading…");
   try {
@@ -145,6 +249,10 @@ async function save() {
 }
 
 $("#save").addEventListener("click", save);
-$("#reset").addEventListener("click", load);
+$("#reset").addEventListener("click", () => {
+  load();
+  loadBudgets();
+});
 
 load();
+loadBudgets();

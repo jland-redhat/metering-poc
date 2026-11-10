@@ -265,6 +265,165 @@ def state():
         return jsonify({"error": str(exc)}), exc.status
 
 
+def entitlements():
+    data = api("GET", "/api/v1/entitlements")
+    items = data.get("items", []) if isinstance(data, dict) else data
+    return [e for e in items or [] if not e.get("deletedAt")]
+
+
+def current_entitlements():
+    """Return the entitlement in force for each subject/feature pair.
+
+    Overriding an entitlement creates a replacement and closes the old one by
+    setting activeTo; the old record stays in the list with no deletedAt, so
+    it must be filtered out explicitly.
+    """
+    latest = {}
+    for ent in entitlements():
+        if ent.get("activeTo"):
+            continue
+        key = (ent.get("subjectKey"), ent.get("featureKey"))
+        seen = latest.get(key)
+        if seen is None or (ent.get("activeFrom") or "") > (seen.get("activeFrom") or ""):
+            latest[key] = ent
+    return list(latest.values())
+
+
+def grant_total(subject, feature_key, entitlement_id=None):
+    """Sum the amounts of an entitlement's active grants.
+
+    The grant total is the budget: usage burns the balance down and the
+    entitlement reports hasAccess=false once every grant is exhausted. When
+    an entitlement id is given, grants left over from a replaced entitlement
+    are ignored.
+    """
+    data = api(
+        "GET",
+        f"/api/v1/subjects/{subject}/entitlements/{feature_key}/grants",
+    )
+    items = data.get("items", []) if isinstance(data, dict) else data
+    return sum(
+        float(g.get("amount") or 0)
+        for g in items or []
+        if not g.get("deletedAt")
+        and (entitlement_id is None or g.get("entitlementId") == entitlement_id)
+    )
+
+
+def entitlement_value(customer_ref, feature_key):
+    try:
+        return api(
+            "GET",
+            f"/api/v1/customers/{customer_ref}/entitlements/{feature_key}/value",
+        )
+    except OpenMeterError:
+        return {}
+
+
+def budget_rows():
+    """Return one row per subject with a metered entitlement."""
+    features = features_by_key()
+    costs = {}
+    try:
+        for row in usage_costs("1970-01-01T00:00:00Z", "2100-01-01T00:00:00Z")["rows"]:
+            if row.get("cost") is not None:
+                costs[row["subject"]] = costs.get(row["subject"], 0) + row["cost"]
+    except OpenMeterError:
+        pass
+
+    by_key = {c["key"]: c for c in customers()}
+    rows = []
+    for ent in current_entitlements():
+        if ent.get("type") != "metered":
+            continue
+        subject = ent.get("subjectKey")
+        feature_key = ent.get("featureKey")
+        customer = by_key.get(subject)
+        value = entitlement_value(customer.get("id") if customer else subject, feature_key)
+        try:
+            budget = grant_total(subject, feature_key, ent.get("id"))
+        except OpenMeterError:
+            budget = None
+        usage = value.get("usage")
+        rows.append(
+            {
+                "subject": subject,
+                "customer": customer.get("id") if customer else None,
+                "featureKey": feature_key,
+                "featureName": (features.get(feature_key) or {}).get("name"),
+                "budget": budget,
+                "usage": usage,
+                "balance": value.get("balance"),
+                "overage": value.get("overage"),
+                "hasAccess": value.get("hasAccess"),
+                "spent": round(costs.get(subject, 0), 8),
+                "entitlementId": ent.get("id"),
+                "usagePeriod": ent.get("usagePeriod"),
+            }
+        )
+    rows.sort(key=lambda r: r["subject"] or "")
+    return rows
+
+
+def set_budget(subject, amount):
+    """Replace a subject's entitlement budget.
+
+    OpenMeter grants are immutable, so the supported way to change a budget
+    is to override the entitlement: a new entitlement is created with the new
+    issueAfterReset grant and the old one is closed by setting activeTo. The
+    usage period anchor and measureUsageFrom are copied so recorded usage is
+    preserved.
+    """
+    if not subject:
+        raise OpenMeterError("subject is required", 400)
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        raise OpenMeterError(f"budget is not a number: {amount!r}", 400)
+    if value < 0:
+        raise OpenMeterError("budget must not be negative", 400)
+
+    ent = next(
+        (
+            e
+            for e in current_entitlements()
+            if e.get("subjectKey") == subject and e.get("type") == "metered"
+        ),
+        None,
+    )
+    if not ent:
+        raise OpenMeterError(f"no metered entitlement for subject {subject}", 404)
+
+    try:
+        current = grant_total(subject, ent["featureKey"], ent.get("id"))
+    except OpenMeterError:
+        current = float(ent.get("issueAfterReset") or 0)
+    if abs(current - value) < 1e-12:
+        return {"changed": False, "message": "budget unchanged"}
+
+    body = {
+        "type": "metered",
+        "featureKey": ent["featureKey"],
+        "usagePeriod": ent.get("usagePeriod") or {"anchor": ent["measureUsageFrom"], "interval": "MONTH"},
+        "measureUsageFrom": ent.get("measureUsageFrom"),
+        "issueAfterReset": value,
+        "isSoftLimit": bool(ent.get("isSoftLimit")),
+        "preserveOverageAtReset": bool(ent.get("preserveOverageAtReset")),
+    }
+    created = api(
+        "PUT",
+        f"/api/v1/subjects/{subject}/entitlements/{ent['id']}/override",
+        body,
+    )
+    return {
+        "changed": True,
+        "subject": subject,
+        "oldBudget": current,
+        "newBudget": value,
+        "entitlementId": created.get("id"),
+    }
+
+
 def usage_costs(start, end):
     """Combine meter usage with the active plan's unit prices.
 
@@ -315,6 +474,26 @@ def costs():
     end = request.args.get("to", "2100-01-01T00:00:00Z")
     try:
         return jsonify(usage_costs(start, end))
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+
+
+@app.get("/api/budgets")
+def budgets():
+    try:
+        return jsonify({"rows": budget_rows()})
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+
+
+@app.post("/api/budgets")
+def update_budget():
+    payload = request.get_json(silent=True) or {}
+    subject = payload.get("subject")
+    amount = payload.get("tokens")
+    try:
+        result = set_budget(subject, amount)
+        return jsonify(result)
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
 
