@@ -13,17 +13,22 @@
 # Re-run this script after gateway or tenant changes.
 #
 # Usage:
-#   ./scripts/enable-maas-metering.sh [--url http://openmeter-metering-proxy.metering.svc.cluster.local:443/meter]
+#   ./scripts/enable-maas-metering.sh [--url http://openmeter-metering-proxy.metering.svc.cluster.local:6443]
 #                                     [--feature inference_tokens]
-#                                     [--chain ipp] [--key extproc.yaml]
+#                                     [--chain post-auth] [--key extproc.yaml]
+#                                     [--namespace models-as-a-service]
+#                                     [--configmap payload-processing-external-model-plugins]
+#                                     [--deployment payload-processing-external-model]
 #                                     [--default-username cluster_admin]
 #
-# There are two ExtProc chains. Model calls are handled by the pre-auth
-# "bbr" chain in pre-extproc.yaml (body-based routing); the post-auth "ipp"
-# chain in extproc.yaml handles the other paths. Run once per pair:
-#   ./scripts/enable-maas-metering.sh                      # ipp / extproc.yaml
-#   ./scripts/enable-maas-metering.sh --chain bbr \
-#       --key pre-extproc.yaml                             # model calls
+# Model calls are handled by the payload-processing-external-model ExtProc in
+# models-as-a-service, chain "post-auth". That is the chain that has the
+# provider credentials and sees the model response:
+#   ./scripts/enable-maas-metering.sh \
+#     --namespace models-as-a-service \
+#     --configmap payload-processing-external-model-plugins \
+#     --deployment payload-processing-external-model \
+#     --chain post-auth
 
 set -euo pipefail
 
@@ -48,6 +53,9 @@ while [[ $# -gt 0 ]]; do
     --feature) FEATURE_KEY="$2"; shift 2 ;;
     --chain) CHAIN_NAME="$2"; shift 2 ;;
     --key) CONFIG_KEY="$2"; shift 2 ;;
+    --namespace) NAMESPACE="$2"; shift 2 ;;
+    --configmap) CONFIGMAP="$2"; shift 2 ;;
+    --deployment) DEPLOYMENT="$2"; shift 2 ;;
     --default-username) DEFAULT_USERNAME="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac

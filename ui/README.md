@@ -143,18 +143,41 @@ gateway ExtProc external_metering
 Every other method and path is proxied to OpenMeter unchanged, so the filter's
 balance check and any other OpenMeter call pass through.
 
-Set the relay as the filter's metering URL and seed a dollar entitlement:
+Install the relay and `token_count` in the ExtProc chains that handle model
+calls, then seed a dollar entitlement. Both chains are needed: `ipp` in
+`openshift-ingress/payload-processing-plugins` is the chain that answers the
+balance check for gateway traffic, and `post-auth` in
+`models-as-a-service/payload-processing-external-model-plugins` is the chain
+that owns provider calls:
 
 ```bash
-./scripts/enable-maas-metering.sh --chain bbr --key pre-extproc.yaml \
-  --url http://openmeter-metering-proxy.metering.svc.cluster.local:6443
+URL=http://openmeter-metering-proxy.metering.svc.cluster.local:6443
+
+./scripts/enable-maas-metering.sh --chain ipp --key extproc.yaml \
+  --feature inference_cost --url "$URL"
+
+./scripts/enable-maas-metering.sh \
+  --namespace models-as-a-service \
+  --configmap payload-processing-external-model-plugins \
+  --deployment payload-processing-external-model \
+  --chain post-auth --key extproc.yaml \
+  --feature inference_cost --url "$URL"
+
 ./scripts/set-balance.sh --user cluster_admin --dollars 50
 ```
 
-Verified end to end in this PoC: a request billing 10 prompt and 16 completion
-tokens on `facebook/opt-125m` produces `cost: 0.047` at the relay, and the
-subject's dollar entitlement drops from 5.00 to 4.76 after a
-`Qwen/Qwen3-0.6B` request of the same size.
+`--feature` sets the entitlement the balance check reads. Pointing it at
+`inference_cost` makes the gateway reject on dollars; leaving it at
+`inference_tokens` keeps the token cut-off.
+
+Verified end to end on this PoC:
+
+- A request billing 10 prompt and 16 completion tokens on `facebook/opt-125m`
+  produces `cost: 0.047` at the relay.
+- Three gateway calls moved the dollar entitlement from 50.00 to 49.863.
+- With a 0.10 dollar budget, traffic spent 0.196, `hasAccess` became false and
+  the next calls returned HTTP 429.
+- Raising the budget back to 50.00 restored HTTP 200.
 
 Limits of this approach:
 
@@ -163,14 +186,8 @@ Limits of this approach:
   after it.
 - A model with no matching rate card produces no `cost` and does not burn the
   dollar budget, while its tokens still count.
-- The gateway load-balances calls through `payload-pre-processing`, whose
-  request-only ExtProc mode hides responses, so `token_count` never sees
-  usage. [deploy/extproc/response-mode.yaml](../deploy/extproc/response-mode.yaml)
-  merges response buffering into that ExtProc. Without it the balance check
-  runs but no usage event is reported.
-- Both changes live in objects the ai-gateway-controller renders or manages;
-  re-run the scripts and re-apply the EnvoyFilter after a gateway reconcile or
-  upgrade.
+- The configmaps are rendered by ai-gateway-controller, so re-run the script
+  after a gateway reconcile or upgrade.
 
 ### The best solution
 
@@ -292,8 +309,11 @@ restart.
 - **Dollar budgets need the relay.** OpenMeter meters a `cost` field, but the
   gateway does not emit one. The relay in this app supplies it; a product
   should price inside the metering filter instead (see "The best solution").
-- **No enforcement.** See ADR 0002. The ExtProc filter that would return 402 is
-  not implemented, so an exhausted budget is reported, not applied.
+- **Enforcement is the balance check, not ADR 0002.** `external_metering`
+  rejects with HTTP 429 when the feature's `hasAccess` is false. The separate
+  budget filter in ADR 0002 (402 with a richer reason) is still design only.
+  The check reads one feature per filter, so a subject is cut off on tokens or
+  dollars depending on the installed `feature_key`, not on both.
 - **No invoices.** The `openmeter-jobs` binary is missing from the
   `v1.0.0-beta.213` image, so billing CronJobs cannot run. Spend in this app and
   in Grafana is computed on read.
