@@ -10,8 +10,70 @@ This is **not** product code and is **not** a CI gate for [models-as-a-service](
 
 - **[ADR 0001 — PoC plan](docs/adr/0001-metering-poc-openmeter-talkback.md)** — detailed architecture, Praxis evaluation gates, OpenMeter pricing model, talk-back contract, and phased delivery.
 - **[ADR 0002 — Envoy budget filter](docs/adr/0002-envoy-budget-filter.md)** — proposed post-Kuadrant Envoy filter that returns 402 when the authenticated user is over budget. Design only; not implemented.
+- **[Metering tenant setup](docs/metering-tenant-setup.md)** — expected customer, subscription, entitlements, models and prices for one tenant, plus the command sequence that reproduces them.
 
 Product intent lives in `models-as-a-service` under `METERING_PROPOSAL/` (`overview.md`, `talkback.md`).
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph client["Client"]
+    TT["traffic-test.sh<br/>smoke-test.sh<br/>curl"]
+  end
+
+  subgraph ingress["openshift-ingress"]
+    GW["Envoy<br/>maas-default-gateway"]
+    AUTH["Kuadrant / Authorino<br/>authentication"]
+    BUDGET["Custom Envoy budget filter<br/>ADR 0002 — proposed, not implemented"]
+    EPP["Praxis ExtProc<br/>payload-processing, chain ipp<br/>external_metering + token_count"]
+    ENABLE["enable-maas-metering.sh<br/>patches ConfigMap, restarts deployment"]
+    GW -->|"ext_authz"| AUTH
+    AUTH -->|"auth decision + identity headers"| GW
+    GW -.->|"ADR 0002 future placement"| BUDGET
+    BUDGET -.->|"402: You outta money fool!"| GW
+    ENABLE -.->|"injects filters"| EPP
+    GW --> EPP
+  end
+
+  subgraph maas["models-as-a-service"]
+    SA["ServiceAccount<br/>openclaw-app"]
+    MODEL["Model server<br/>facebook/opt-125m"]
+  end
+
+  subgraph meter["metering"]
+    OM["OpenMeter API<br/>:6443"]
+    KAFKA["Kafka"]
+    SINK["Sink worker"]
+    CH[("ClickHouse<br/>usage events")]
+    PG[("PostgreSQL<br/>customers, entitlements")]
+    REDIS[("Redis")]
+    GRAF["Grafana<br/>Infinity datasource"]
+    SCRIPTS["seed-openmeter.sh<br/>set-balance.sh"]
+  end
+
+  TT -->|"Bearer token + x-maas-username"| GW
+  SA -.->|"oc create token"| TT
+  EPP -->|"proxied inference request"| MODEL
+  MODEL -->|"response + usage"| EPP
+  EPP -->|"preflight: entitlement value<br/>hasAccess, balance"| OM
+  EPP -->|"CloudEvent usage event"| OM
+  OM --> KAFKA
+  KAFKA --> SINK
+  SINK --> CH
+  OM --- PG
+  OM --- REDIS
+  GRAF -->|"REST API queries"| OM
+  SCRIPTS -->|"meters, features, customers,<br/>entitlements, balances"| OM
+```
+
+The inference path is client → Envoy gateway → Praxis ExtProc → model. The
+ExtProc's `external_metering` filter checks the subject's OpenMeter entitlement
+before the call and emits a CloudEvent after the response; `token_count` supplies
+the usage numbers. OpenMeter stores events through Kafka into ClickHouse and
+keeps customers and entitlements in PostgreSQL. Grafana queries the OpenMeter
+REST API with the Infinity datasource. The dashed budget-filter path is the
+ADR 0002 proposal and is not deployed.
 
 ## Status
 
