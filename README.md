@@ -54,7 +54,7 @@ oc get route grafana -n metering -o jsonpath='{.spec.host}'
 ```
 
 Open `https://<host>` and pick the **OpenMeter usage** dashboard in the
-OpenMeter folder. The `Subject` textbox (default `cluster_admin`) controls the
+OpenMeter folder. The `Subject` textbox (default `openclaw_app`) controls the
 balance and usage panels. anonymous viewer access is enabled for the PoC; the admin password is in Secret
 `grafana-admin` (the install script ends by printing the command that reads it).
 

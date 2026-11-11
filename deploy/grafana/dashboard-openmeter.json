@@ -701,7 +701,7 @@
   {
    "id": 24,
    "type": "table",
-   "title": "Spend by model — ${subject}",
+   "title": "Spend by model \u2014 ${subject}",
    "description": "Usage for the selected subject priced at the active plan's rates, broken out by model. A model with no rate card shows tokens but no spend. The footer sums the priced spend.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
@@ -904,10 +904,10 @@
     "name": "subject",
     "label": "Subject",
     "type": "textbox",
-    "query": "cluster_admin",
+    "query": "openclaw_app",
     "current": {
-     "text": "cluster_admin",
-     "value": "cluster_admin"
+     "text": "openclaw_app",
+     "value": "openclaw_app"
     }
    }
   ]
