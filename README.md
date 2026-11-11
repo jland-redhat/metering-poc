@@ -30,9 +30,10 @@ Deployment assets for the cluster PoC live under `deploy/` and `scripts/`:
   OpenMeter's key regex (lowercase, digits, underscores).
 - `scripts/enable-maas-metering.sh` — inject the `external_metering` and
   `token_count` filters into the `ipp` chain of the gateway ExtProc
-  (`openshift-ingress`, deployment `payload-processing`). The
-  `ai-gateway-controller` reverts this ConfigMap, so re-run the script after
-  gateway or tenant changes.
+  (`openshift-ingress`, deployment `payload-processing`). The script also
+  sets `opendatahub.io/managed: "false"` on the ConfigMap and Deployment.
+  `maas-controller` honours that, but `ai-gateway-controller` still re-renders
+  on its 5-minute resync, so re-run the script after a reconcile.
 - `deploy/maas/traffic-account.yaml` — ServiceAccount `openclaw-app` in
   `models-as-a-service`. `scripts/traffic-test.sh` mints a token for it and
   meters traffic as the OpenMeter subject `openclaw_app`.
@@ -97,6 +98,11 @@ oc apply -f deploy/maas/traffic-account.yaml
 `oc create token openclaw-app -n models-as-a-service --duration=1h`, so no
 secret is stored. It sends `x-maas-username: openclaw_app` and stops at the
 first HTTP 402.
+
+Pass `--use-me` to meter as the current `oc` user instead: the token comes from
+`oc whoami -t` and the subject defaults to `oc whoami` normalized to an
+OpenMeter key. Set that subject's balance first, or override it with
+`--username`.
 
 ## Container runtime
 

@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./scripts/traffic-test.sh
+#   ./scripts/traffic-test.sh --use-me
 #   ./scripts/traffic-test.sh --count 20 --max-tokens 64
 #   ./scripts/traffic-test.sh --model publishers/llm/models/facebook/opt-125m
 #   ./scripts/traffic-test.sh --username openclaw_app --service-account openclaw-app
@@ -17,6 +18,12 @@
 # x-maas-username: openclaw_app on every call. Set --username to change the
 # subject, --service-account to use another ServiceAccount, or MAAS_API_KEY to
 # skip token minting and use a fixed bearer token.
+#
+# --use-me switches identity to the current oc user instead: the bearer token
+# comes from `oc whoami -t`, and the subject defaults to `oc whoami` normalized
+# to an OpenMeter key (lowercase, digits, underscores). Pass --username to
+# override the subject. The gateway meters as that header value, so set its
+# balance with set-balance.sh.
 #
 # The loop records the HTTP status of every call and stops at the first 402 by
 # default. A 402 means the admission filter rejected the request: the
@@ -41,7 +48,8 @@ PROMPT="${PROMPT:-Hello}"
 STOP_ON_EXHAUSTED=1
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-openclaw-app}"
 SERVICE_ACCOUNT_NAMESPACE="${SERVICE_ACCOUNT_NAMESPACE:-models-as-a-service}"
-MAAS_USERNAME="${MAAS_USERNAME:-openclaw_app}"
+MAAS_USERNAME="${MAAS_USERNAME:-}"
+USE_ME=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,9 +61,10 @@ while [[ $# -gt 0 ]]; do
     --username) MAAS_USERNAME="$2"; shift 2 ;;
     --service-account) SERVICE_ACCOUNT="$2"; shift 2 ;;
     --service-account-namespace) SERVICE_ACCOUNT_NAMESPACE="$2"; shift 2 ;;
+    --use-me) USE_ME=1; shift ;;
     --keep-going) STOP_ON_EXHAUSTED=0; shift ;;
     -h|--help)
-      sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+      awk 'NR==1{next} /^set -euo pipefail/{exit} {sub(/^# ?/,""); print}' "$0"
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -66,12 +75,42 @@ if [[ ! "${COUNT}" =~ ^[0-9]+$ || "${COUNT}" -eq 0 ]]; then
   exit 2
 fi
 
-if [[ -z "${MAAS_API_KEY:-}" ]]; then
-  if ! MAAS_API_KEY="$(oc create token "${SERVICE_ACCOUNT}" \
-      -n "${SERVICE_ACCOUNT_NAMESPACE}" --duration=1h 2>/dev/null)"; then
-    echo "cannot mint token for ServiceAccount ${SERVICE_ACCOUNT} in ${SERVICE_ACCOUNT_NAMESPACE}; falling back to oc whoami -t" >&2
-    MAAS_API_KEY="$(oc whoami -t)"
+openmeter_key() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+}
+
+if [[ "${USE_ME}" -eq 1 ]]; then
+  OC_USER="$(oc whoami 2>/dev/null || true)"
+  if [[ -z "${OC_USER}" ]]; then
+    echo "--use-me requires an active oc session (oc whoami failed)" >&2
+    exit 1
   fi
+  if [[ -z "${MAAS_USERNAME}" ]]; then
+    MAAS_USERNAME="$(openmeter_key "${OC_USER}")"
+    echo "using oc user ${OC_USER} as OpenMeter subject ${MAAS_USERNAME}" >&2
+  fi
+  if [[ -z "${MAAS_API_KEY:-}" ]]; then
+    if ! MAAS_API_KEY="$(oc whoami -t 2>/dev/null)"; then
+      echo "--use-me cannot read a token from oc whoami -t; log in again" >&2
+      exit 1
+    fi
+  fi
+else
+  MAAS_USERNAME="${MAAS_USERNAME:-openclaw_app}"
+  if [[ -z "${MAAS_API_KEY:-}" ]]; then
+    if ! MAAS_API_KEY="$(oc create token "${SERVICE_ACCOUNT}" \
+        -n "${SERVICE_ACCOUNT_NAMESPACE}" --duration=1h 2>/dev/null)"; then
+      echo "cannot mint token for ServiceAccount ${SERVICE_ACCOUNT} in ${SERVICE_ACCOUNT_NAMESPACE}; falling back to oc whoami -t" >&2
+      MAAS_API_KEY="$(oc whoami -t)"
+    fi
+  fi
+fi
+
+if [[ ! "${MAAS_USERNAME}" =~ ^[a-z0-9]+(_[a-z0-9]+)*$ ]]; then
+  echo "subject '${MAAS_USERNAME}' is not a valid OpenMeter key" >&2
+  echo "it must match ^[a-z0-9]+(?:_[a-z0-9]+)*\$; pass --username with a valid key" >&2
+  exit 2
 fi
 
 PAYLOAD=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"max_tokens":%d}' \

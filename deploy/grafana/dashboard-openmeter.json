@@ -335,7 +335,7 @@
     "h": 8,
     "w": 8,
     "x": 0,
-    "y": 14
+    "y": 22
    },
    "options": {
     "displayMode": "gradient",
@@ -405,7 +405,7 @@
     "h": 8,
     "w": 8,
     "x": 8,
-    "y": 14
+    "y": 22
    },
    "fieldConfig": {
     "defaults": {
@@ -487,7 +487,7 @@
     "h": 8,
     "w": 8,
     "x": 16,
-    "y": 14
+    "y": 22
    },
    "fieldConfig": {
     "defaults": {
@@ -560,7 +560,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 22
+    "y": 30
    },
    "options": {
     "displayMode": "gradient",
@@ -635,7 +635,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 22
+    "y": 30
    },
    "options": {
     "displayMode": "gradient",
@@ -701,21 +701,35 @@
   {
    "id": 24,
    "type": "table",
-   "title": "Spend by model",
-   "description": "Usage for the selected subject priced at the active plan's rates, broken out by model. A model with no rate card shows tokens but no spend.",
+   "title": "Spend by model — ${subject}",
+   "description": "Usage for the selected subject priced at the active plan's rates, broken out by model. A model with no rate card shows tokens but no spend. The footer sums the priced spend.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
     "uid": "openmeter-costs"
    },
    "gridPos": {
-    "h": 6,
+    "h": 8,
     "w": 24,
     "x": 0,
-    "y": 30
+    "y": 14
    },
    "options": {
     "showHeader": true,
-    "cellHeight": "sm"
+    "cellHeight": "md",
+    "sortBy": [
+     {
+      "displayName": "spent",
+      "desc": true
+     }
+    ],
+    "footer": {
+     "show": true,
+     "reducer": [
+      "sum"
+     ],
+     "fields": "",
+     "countRows": false
+    }
    },
    "fieldConfig": {
     "defaults": {
@@ -724,7 +738,8 @@
       "cellOptions": {
        "type": "auto"
       },
-      "inspect": false
+      "inspect": false,
+      "filterable": true
      }
     },
     "overrides": [
@@ -736,7 +751,13 @@
       "properties": [
        {
         "id": "custom.width",
-        "value": 320
+        "value": 380
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "auto"
+        }
        }
       ]
      },
@@ -785,6 +806,44 @@
        {
         "id": "decimals",
         "value": 4
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "gauge",
+         "mode": "gradient",
+         "valueDisplayMode": "text"
+        }
+       },
+       {
+        "id": "custom.width",
+        "value": 220
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "percentage",
+         "steps": [
+          {
+           "color": "green",
+           "value": null
+          },
+          {
+           "color": "yellow",
+           "value": 60
+          },
+          {
+           "color": "red",
+           "value": 85
+          }
+         ]
+        }
        }
       ]
      }

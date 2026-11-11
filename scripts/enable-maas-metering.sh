@@ -8,15 +8,15 @@
 # payload-processing-external-model ExtProc serves provider-side traffic
 # instead.
 #
-# The ai-gateway-controller renders this ConfigMap from its own templates. To
-# stop it reverting the edit, the script sets the annotation
+# The ai-gateway-controller renders this ConfigMap from its own templates and
+# resyncs it every --resync-interval (default 5m). The script sets
 #
 #   opendatahub.io/managed: "false"
 #
-# on both the ConfigMap and the ExtProc Deployment, which makes the controller
-# skip them ("Skipping resource due to opendatahub.io/managed=false
-# annotation"). Remove the annotations (or re-apply the tenant config) to hand
-# the resources back to the controller.
+# on both the ConfigMap and the ExtProc Deployment so maas-controller skips
+# these praxis resources. ai-gateway-controller (commit e9723ca) still
+# re-renders them on resync, so the injection remains temporary and this
+# script must be re-run after a reconcile.
 #
 # Usage:
 #   ./scripts/enable-maas-metering.sh [--url http://openmeter-metering-proxy.metering.svc.cluster.local:6443]
