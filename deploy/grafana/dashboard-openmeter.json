@@ -157,7 +157,7 @@
    "id": 22,
    "type": "stat",
    "title": "Admission Hook \u2014 ${subject}",
-   "description": "Entitlement answer for the subject: ADMIT while every grant covers usage, REJECT once one is exhausted. The gateway budget filter enforces REJECT with HTTP 402.",
+   "description": "hasAccess from the subject's inference_cost (USD) entitlement: ADMITTED while balance covers usage, DENIED once exhausted. The gateway budget filter enforces DENIED with HTTP 402.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
     "uid": "openmeter-costs"
@@ -173,7 +173,7 @@
      "calcs": [
       "lastNotNull"
      ],
-     "fields": "",
+     "fields": "/.*/",
      "values": false
     },
     "colorMode": "background",
@@ -193,20 +193,25 @@
       {
        "type": "value",
        "options": {
-        "ADMIT": {
-         "text": "ADMIT",
+        "true": {
+         "text": "ADMITTED",
          "color": "green",
          "index": 0
         },
-        "REJECT": {
-         "text": "REJECT",
+        "false": {
+         "text": "DENIED",
          "color": "red",
          "index": 1
         },
-        "NO DATA": {
-         "text": "NO DATA",
-         "color": "text",
+        "1": {
+         "text": "ADMITTED",
+         "color": "green",
          "index": 2
+        },
+        "0": {
+         "text": "DENIED",
+         "color": "red",
+         "index": 3
         }
        }
       }
@@ -221,14 +226,14 @@
      "source": "url",
      "format": "table",
      "parser": "backend",
-     "url": "/api/budgets?subject=${subject}&summary=1",
+     "url": "/api/v1/customers/${subject}/entitlements/inference_cost/value",
      "url_options": {
       "method": "GET"
      },
      "columns": [
       {
-       "selector": "admission",
-       "text": "admission",
+       "selector": "hasAccess",
+       "text": "hasAccess",
        "type": "string"
       }
      ],

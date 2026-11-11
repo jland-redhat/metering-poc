@@ -8,9 +8,15 @@
 # payload-processing-external-model ExtProc serves provider-side traffic
 # instead.
 #
-# The ai-gateway-controller renders this ConfigMap from its own templates, so
-# this edit is reverted whenever the controller reconciles the gateway.
-# Re-run this script after gateway or tenant changes.
+# The ai-gateway-controller renders this ConfigMap from its own templates. To
+# stop it reverting the edit, the script sets the annotation
+#
+#   opendatahub.io/managed: "false"
+#
+# on both the ConfigMap and the ExtProc Deployment, which makes the controller
+# skip them ("Skipping resource due to opendatahub.io/managed=false
+# annotation"). Remove the annotations (or re-apply the tenant config) to hand
+# the resources back to the controller.
 #
 # Usage:
 #   ./scripts/enable-maas-metering.sh [--url http://openmeter-metering-proxy.metering.svc.cluster.local:6443]
@@ -65,6 +71,20 @@ done
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+# pre-extproc.yaml is served by payload-pre-processing; extproc.yaml by
+# payload-processing.
+case "${CONFIG_KEY}" in
+  pre-*) DEPLOYMENT="payload-pre-processing" ;;
+  *) DEPLOYMENT="${DEPLOYMENT}" ;;
+esac
+
+# Tell the ai-gateway-controller to leave both objects alone. Without this the
+# next reconcile restores its template and drops the injected filter.
+oc annotate configmap "${CONFIGMAP}" -n "${NAMESPACE}" \
+  opendatahub.io/managed=false --overwrite
+oc annotate deployment "${DEPLOYMENT}" -n "${NAMESPACE}" \
+  opendatahub.io/managed=false --overwrite
 
 oc get configmap "${CONFIGMAP}" -n "${NAMESPACE}" \
   -o jsonpath="{.data.${CONFIG_KEY//./\\.}}" > "${WORKDIR}/${CONFIG_KEY}"
@@ -148,13 +168,6 @@ print(json.dumps({"data": {key: updated}}))
 PY
 
 oc patch configmap "${CONFIGMAP}" -n "${NAMESPACE}" --type merge -p "$(cat "${WORKDIR}/patch.json")"
-
-# pre-extproc.yaml is served by payload-pre-processing; extproc.yaml by
-# payload-processing.
-case "${CONFIG_KEY}" in
-  pre-*) DEPLOYMENT="payload-pre-processing" ;;
-  *) DEPLOYMENT="${DEPLOYMENT}" ;;
-esac
 
 oc rollout restart "deployment/${DEPLOYMENT}" -n "${NAMESPACE}"
 oc rollout status "deployment/${DEPLOYMENT}" -n "${NAMESPACE}" --timeout=180s
