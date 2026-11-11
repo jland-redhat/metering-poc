@@ -19,7 +19,7 @@
 #                                     [--namespace models-as-a-service]
 #                                     [--configmap payload-processing-external-model-plugins]
 #                                     [--deployment payload-processing-external-model]
-#                                     [--default-username cluster_admin]
+#                                     [--default-username openclaw_app]
 #
 # Model calls are handled by the payload-processing-external-model ExtProc in
 # models-as-a-service, chain "post-auth". That is the chain that has the
@@ -43,9 +43,11 @@ CONFIG_KEY="${CONFIG_KEY:-extproc.yaml}"
 METERING_URL="${METERING_URL:-http://openmeter-api.metering.svc.cluster.local:6443}"
 FEATURE_KEY="${FEATURE_KEY:-inference_tokens}"
 SOURCE_NAME="${SOURCE_NAME:-maas-gateway}"
-# Used when no identity header is available to the filter. Must satisfy the
-# OpenMeter customer-key regex ^[a-z0-9]+(?:_[a-z0-9]+)*$ (no hyphens).
-DEFAULT_USERNAME="${DEFAULT_USERNAME:-cluster_admin}"
+# Used when no identity header is available to the filter. The ipp chain never
+# sees the x-maas-* headers (see ADR 0001), so this value is what gateway
+# traffic is metered as. Must satisfy the OpenMeter customer-key regex
+# ^[a-z0-9]+(?:_[a-z0-9]+)*$ (no hyphens).
+DEFAULT_USERNAME="${DEFAULT_USERNAME:-openclaw_app}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

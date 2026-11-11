@@ -9,8 +9,8 @@
   {
    "id": 20,
    "type": "stat",
-   "title": "Token balance \u2014 ${subject}",
-   "description": "Tokens left in the subject's current OpenMeter entitlement.",
+   "title": "USD balance \u2014 ${subject}",
+   "description": "Dollars left on the subject's inference_cost entitlement. The gateway returns HTTP 402 when it reaches zero.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
     "uid": "openmeter-costs"
@@ -39,8 +39,8 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "none",
-     "decimals": 0,
+     "unit": "currencyUSD",
+     "decimals": 2,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -64,7 +64,7 @@
      "source": "url",
      "format": "table",
      "parser": "backend",
-     "url": "/api/budgets?subject=${subject}",
+     "url": "/api/budgets?subject=${subject}&feature=inference_cost",
      "url_options": {
       "method": "GET"
      },
@@ -694,161 +694,96 @@
    ]
   },
   {
-   "id": 11,
-   "type": "stat",
-   "title": "Detail: ${subject} prompt opt-125m",
-   "description": "Spend for tokens_prompt on facebook/opt-125m at the active plan's price.",
+   "id": 24,
+   "type": "table",
+   "title": "Spend by model",
+   "description": "Usage for the selected subject priced at the active plan's rates, broken out by model. A model with no rate card shows tokens but no spend.",
    "datasource": {
     "type": "yesoreyeram-infinity-datasource",
     "uid": "openmeter-costs"
    },
    "gridPos": {
-    "h": 5,
-    "w": 6,
+    "h": 6,
+    "w": 24,
     "x": 0,
     "y": 30
    },
    "options": {
-    "colorMode": "value",
-    "graphMode": "none",
-    "textMode": "auto",
-    "text": {
-     "valueSize": 30,
-     "titleSize": 12
-    }
+    "showHeader": true,
+    "cellHeight": "sm"
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "currencyUSD",
-     "decimals": 4
-    },
-    "overrides": []
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "type": "json",
-     "source": "url",
-     "format": "table",
-     "parser": "backend",
-     "url": "/api/costs?from=${__from:date:iso}&to=${__to:date:iso}&subject=${subject}&meter=tokens_prompt&model=facebook/opt-125m",
-     "url_options": {
-      "method": "GET"
-     },
-     "root_selector": "rows",
-     "columns": [
-      {
-       "selector": "tokens",
-       "text": "tokens",
-       "type": "number"
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
       },
-      {
-       "selector": "cost",
-       "text": "cost",
-       "type": "number"
-      }
-     ],
-     "datasource": {
-      "type": "yesoreyeram-infinity-datasource",
-      "uid": "openmeter-costs"
+      "inspect": false
      }
-    }
-   ],
-   "transformations": []
-  },
-  {
-   "id": 12,
-   "type": "stat",
-   "title": "Detail: ${subject} prompt Qwen3-0.6B",
-   "description": "Spend for tokens_prompt on Qwen/Qwen3-0.6B at the active plan's price.",
-   "datasource": {
-    "type": "yesoreyeram-infinity-datasource",
-    "uid": "openmeter-costs"
-   },
-   "gridPos": {
-    "h": 5,
-    "w": 6,
-    "x": 6,
-    "y": 30
-   },
-   "options": {
-    "colorMode": "value",
-    "graphMode": "none",
-    "textMode": "auto",
-    "text": {
-     "valueSize": 30,
-     "titleSize": 12
-    }
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "currencyUSD",
-     "decimals": 4
     },
-    "overrides": []
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "type": "json",
-     "source": "url",
-     "format": "table",
-     "parser": "backend",
-     "url": "/api/costs?from=${__from:date:iso}&to=${__to:date:iso}&subject=${subject}&meter=tokens_prompt&model=Qwen/Qwen3-0.6B",
-     "url_options": {
-      "method": "GET"
-     },
-     "root_selector": "rows",
-     "columns": [
-      {
-       "selector": "tokens",
-       "text": "tokens",
-       "type": "number"
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "model"
       },
-      {
-       "selector": "cost",
-       "text": "cost",
-       "type": "number"
-      }
-     ],
-     "datasource": {
-      "type": "yesoreyeram-infinity-datasource",
-      "uid": "openmeter-costs"
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 320
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "promptTokens"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "short"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "completionTokens"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "short"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "spent"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 4
+       }
+      ]
      }
-    }
-   ],
-   "transformations": []
-  },
-  {
-   "id": 13,
-   "type": "stat",
-   "title": "Detail: ${subject} completion opt-125m",
-   "description": "Spend for tokens_completion on facebook/opt-125m at the active plan's price.",
-   "datasource": {
-    "type": "yesoreyeram-infinity-datasource",
-    "uid": "openmeter-costs"
-   },
-   "gridPos": {
-    "h": 5,
-    "w": 6,
-    "x": 12,
-    "y": 30
-   },
-   "options": {
-    "colorMode": "value",
-    "graphMode": "none",
-    "textMode": "auto",
-    "text": {
-     "valueSize": 30,
-     "titleSize": 12
-    }
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "currencyUSD",
-     "decimals": 4
-    },
-    "overrides": []
+    ]
    },
    "targets": [
     {
@@ -857,83 +792,29 @@
      "source": "url",
      "format": "table",
      "parser": "backend",
-     "url": "/api/costs?from=${__from:date:iso}&to=${__to:date:iso}&subject=${subject}&meter=tokens_completion&model=facebook/opt-125m",
+     "url": "/api/spend-by-model?from=${__from:date:iso}&to=${__to:date:iso}&subject=${subject}",
      "url_options": {
       "method": "GET"
      },
-     "root_selector": "rows",
      "columns": [
       {
-       "selector": "tokens",
-       "text": "tokens",
+       "selector": "model",
+       "text": "model",
+       "type": "string"
+      },
+      {
+       "selector": "promptTokens",
+       "text": "promptTokens",
        "type": "number"
       },
       {
-       "selector": "cost",
-       "text": "cost",
-       "type": "number"
-      }
-     ],
-     "datasource": {
-      "type": "yesoreyeram-infinity-datasource",
-      "uid": "openmeter-costs"
-     }
-    }
-   ],
-   "transformations": []
-  },
-  {
-   "id": 14,
-   "type": "stat",
-   "title": "Detail: ${subject} completion Qwen3-0.6B",
-   "description": "Spend for tokens_completion on Qwen/Qwen3-0.6B at the active plan's price.",
-   "datasource": {
-    "type": "yesoreyeram-infinity-datasource",
-    "uid": "openmeter-costs"
-   },
-   "gridPos": {
-    "h": 5,
-    "w": 6,
-    "x": 18,
-    "y": 30
-   },
-   "options": {
-    "colorMode": "value",
-    "graphMode": "none",
-    "textMode": "auto",
-    "text": {
-     "valueSize": 30,
-     "titleSize": 12
-    }
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "currencyUSD",
-     "decimals": 4
-    },
-    "overrides": []
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "type": "json",
-     "source": "url",
-     "format": "table",
-     "parser": "backend",
-     "url": "/api/costs?from=${__from:date:iso}&to=${__to:date:iso}&subject=${subject}&meter=tokens_completion&model=Qwen/Qwen3-0.6B",
-     "url_options": {
-      "method": "GET"
-     },
-     "root_selector": "rows",
-     "columns": [
-      {
-       "selector": "tokens",
-       "text": "tokens",
+       "selector": "completionTokens",
+       "text": "completionTokens",
        "type": "number"
       },
       {
-       "selector": "cost",
-       "text": "cost",
+       "selector": "spent",
+       "text": "spent",
        "type": "number"
       }
      ],

@@ -6,6 +6,17 @@
 #   ./scripts/traffic-test.sh
 #   ./scripts/traffic-test.sh --count 20 --max-tokens 64
 #   ./scripts/traffic-test.sh --model publishers/llm/models/facebook/opt-125m
+#   ./scripts/traffic-test.sh --username openclaw_app --service-account openclaw-app
+#
+# Identity: by default the script mints a short-lived token for the
+# ServiceAccount "openclaw-app" in models-as-a-service with
+#
+#   oc create token openclaw-app -n models-as-a-service --duration=1h
+#
+# and meters the traffic as the OpenMeter subject "openclaw_app" by sending
+# x-maas-username: openclaw_app on every call. Set --username to change the
+# subject, --service-account to use another ServiceAccount, or MAAS_API_KEY to
+# skip token minting and use a fixed bearer token.
 #
 # The loop records the HTTP status of every call and stops at the first 402 by
 # default. A 402 means the admission filter rejected the request: the
@@ -16,10 +27,8 @@
 # --feature). Without that filter installed, calls keep returning 200 and the
 # script reports "all calls admitted".
 #
-# Identity comes from MAAS_API_KEY when set, otherwise from `oc whoami -t`.
-# The username the gateway meters against comes from the request headers
-# (x-maas-username or the authenticated user), so run it as the same user whose
-# balance you set with set-balance.sh.
+# The gateway meters as --username, so set that subject's balance with
+# set-balance.sh before running.
 
 set -euo pipefail
 
@@ -30,6 +39,9 @@ MAX_TOKENS="${MAX_TOKENS:-16}"
 DELAY_SECS="${DELAY_SECS:-0.3}"
 PROMPT="${PROMPT:-Hello}"
 STOP_ON_EXHAUSTED=1
+SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-openclaw-app}"
+SERVICE_ACCOUNT_NAMESPACE="${SERVICE_ACCOUNT_NAMESPACE:-models-as-a-service}"
+MAAS_USERNAME="${MAAS_USERNAME:-openclaw_app}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,9 +50,12 @@ while [[ $# -gt 0 ]]; do
     --delay) DELAY_SECS="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
+    --username) MAAS_USERNAME="$2"; shift 2 ;;
+    --service-account) SERVICE_ACCOUNT="$2"; shift 2 ;;
+    --service-account-namespace) SERVICE_ACCOUNT_NAMESPACE="$2"; shift 2 ;;
     --keep-going) STOP_ON_EXHAUSTED=0; shift ;;
     -h|--help)
-      sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -52,16 +67,21 @@ if [[ ! "${COUNT}" =~ ^[0-9]+$ || "${COUNT}" -eq 0 ]]; then
 fi
 
 if [[ -z "${MAAS_API_KEY:-}" ]]; then
-  MAAS_API_KEY="$(oc whoami -t)"
+  if ! MAAS_API_KEY="$(oc create token "${SERVICE_ACCOUNT}" \
+      -n "${SERVICE_ACCOUNT_NAMESPACE}" --duration=1h 2>/dev/null)"; then
+    echo "cannot mint token for ServiceAccount ${SERVICE_ACCOUNT} in ${SERVICE_ACCOUNT_NAMESPACE}; falling back to oc whoami -t" >&2
+    MAAS_API_KEY="$(oc whoami -t)"
+  fi
 fi
 
 PAYLOAD=$(printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"max_tokens":%d}' \
   "${MODEL}" "${PROMPT}" "${MAX_TOKENS}")
 URL="${GATEWAY_URL%/}/v1/chat/completions"
 
-echo "gateway: ${GATEWAY_URL}"
-echo "model:   ${MODEL}"
-echo "count:   ${COUNT} (max_tokens ${MAX_TOKENS})"
+echo "gateway:  ${GATEWAY_URL}"
+echo "model:    ${MODEL}"
+echo "username: ${MAAS_USERNAME}"
+echo "count:    ${COUNT} (max_tokens ${MAX_TOKENS})"
 echo
 
 sum_prompt=0
@@ -78,6 +98,7 @@ for i in $(seq 1 "${COUNT}"); do
   RESP=$(curl -skS --connect-timeout 10 --max-time 120 -w '\n%{http_code}' \
     -X POST "${URL}" \
     -H "Authorization: Bearer ${MAAS_API_KEY}" \
+    -H "x-maas-username: ${MAAS_USERNAME}" \
     -H 'Content-Type: application/json' \
     -d "${PAYLOAD}" 2>/dev/null || printf '\n000')
   BODY=$(printf '%s' "${RESP}" | sed '$d')

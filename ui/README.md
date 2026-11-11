@@ -163,12 +163,18 @@ URL=http://openmeter-metering-proxy.metering.svc.cluster.local:6443
   --chain post-auth --key extproc.yaml \
   --feature inference_cost --url "$URL"
 
-./scripts/set-balance.sh --user cluster_admin --dollars 50
+./scripts/set-balance.sh --user openclaw_app --dollars 50
 ```
 
 `--feature` sets the entitlement the balance check reads. Pointing it at
 `inference_cost` makes the gateway reject on dollars; leaving it at
 `inference_tokens` keeps the token cut-off.
+
+The `ipp` chain never sees the `x-maas-*` headers (ADR 0001), so the filter's
+`default_username` is the OpenMeter subject gateway traffic is metered as. It
+defaults to `openclaw_app`, matching the ServiceAccount in
+`deploy/maas/traffic-account.yaml`; pass `--default-username cluster_admin` for
+the older single-subject demo.
 
 Verified end to end on this PoC:
 
@@ -278,9 +284,10 @@ subject crosses it.
 | `GET` | `/healthz` | Liveness/readiness probe |
 | `GET` | `/api/state` | Active plan, rate cards, subscriptions |
 | `POST` | `/api/prices` | Body `{"prices": {"<rateCardKey>": <amount>}}`; creates and publishes the next plan version |
-| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent, unit and admission; optional `?subject=` filter and `?summary=1` for a single ADMIT/REJECT value |
+| `GET` | `/api/budgets` | One row per metered entitlement with budget, usage, balance, spent, unit and admission; optional `?subject=` and `?feature=` filters and `?summary=1` for a single ADMIT/REJECT value |
 | `POST` | `/api/budgets` | Body `{"subject": "<subjectKey>", "featureKey": "<feature>", "amount": <grant>}`; overrides the entitlement grant |
 | `GET` | `/api/costs?from=&to=` | Usage joined to prices; one row per subject/meter/model with `cost`; optional `subject`, `meter` and `model` filters |
+| `GET` | `/api/spend-by-model?from=&to=` | JSON array with one row per model (`model`, `promptTokens`, `completionTokens`, `tokens`, `spent`); optional `subject` filter. Built for the Grafana "Spend by model" table |
 | `GET` | `/api/enforcement` | Enforcement switch state; forwarded to the relay |
 | `POST` | `/api/enforcement` | Body `{"enforce": <bool>}`; switches the relay's balance answer |
 | `POST` | `/meter` | Metering relay: prices one usage CloudEvent and forwards it to OpenMeter |

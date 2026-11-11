@@ -33,6 +33,9 @@ Deployment assets for the cluster PoC live under `deploy/` and `scripts/`:
   (`openshift-ingress`, deployment `payload-processing`). The
   `ai-gateway-controller` reverts this ConfigMap, so re-run the script after
   gateway or tenant changes.
+- `deploy/maas/traffic-account.yaml` — ServiceAccount `openclaw-app` in
+  `models-as-a-service`. `scripts/traffic-test.sh` mints a token for it and
+  meters traffic as the OpenMeter subject `openclaw_app`.
 - `scripts/smoke-test.sh` — send one inference request through the gateway and
   confirm OpenMeter received the usage event with non-zero token counts.
 - `deploy/grafana/` and `scripts/install-grafana.sh` — Grafana in the `metering`
@@ -81,6 +84,19 @@ gateway side is a configuration change rather than a custom image build.
 ./scripts/enable-maas-metering.sh
 MAAS_API_KEY="$(oc whoami -t)" ./scripts/smoke-test.sh
 ```
+
+Drive billable traffic as a ServiceAccount and exhaust its dollar budget:
+
+```bash
+oc apply -f deploy/maas/traffic-account.yaml
+./scripts/set-balance.sh --user openclaw_app --dollars 5
+./scripts/traffic-test.sh --count 20
+```
+
+`traffic-test.sh` mints its token with
+`oc create token openclaw-app -n models-as-a-service --duration=1h`, so no
+secret is stored. It sends `x-maas-username: openclaw_app` and stops at the
+first HTTP 402.
 
 ## Container runtime
 

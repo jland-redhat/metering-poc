@@ -670,6 +670,48 @@ def usage_costs(start, end, subject=None, meter=None, model=None):
     return {"plan": {"key": plan.get("key"), "version": plan.get("version")}, "rows": rows}
 
 
+def spend_by_model(start, end, subject=None):
+    """Aggregate priced usage into one row per model.
+
+    Returns a JSON array (not an object) so Grafana Infinity can read it as a
+    table without a root selector. Prompt and completion meters are averaged
+    into one row per model, and only rows with a matching rate card carry a
+    cost; a model with no price still reports its token counts.
+    """
+    rows = usage_costs(start, end, subject=subject)["rows"]
+    by_model = {}
+    for row in rows:
+        if row["model"] == "(none)":
+            # Events with no model cannot be priced or attributed to a model.
+            continue
+        entry = by_model.setdefault(
+            row["model"],
+            {"model": row["model"], "promptTokens": 0, "completionTokens": 0, "spent": 0.0},
+        )
+        tokens = row.get("tokens") or 0
+        if row["meter"] == "tokens_prompt":
+            entry["promptTokens"] += tokens
+        elif row["meter"] == "tokens_completion":
+            entry["completionTokens"] += tokens
+        if row.get("cost") is not None:
+            entry["spent"] += row["cost"]
+    result = sorted(by_model.values(), key=lambda r: r["model"])
+    for entry in result:
+        entry["tokens"] = entry["promptTokens"] + entry["completionTokens"]
+        entry["spent"] = round(entry["spent"], 8)
+    return result
+
+
+@app.get("/api/spend-by-model")
+def model_spend():
+    start = request.args.get("from", "1970-01-01T00:00:00Z")
+    end = request.args.get("to", "2100-01-01T00:00:00Z")
+    try:
+        return jsonify(spend_by_model(start, end, subject=request.args.get("subject") or None))
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+
+
 @app.get("/api/costs")
 def costs():
     start = request.args.get("from", "1970-01-01T00:00:00Z")
@@ -695,6 +737,9 @@ def budgets():
         subject = request.args.get("subject")
         if subject:
             rows = [r for r in rows if r["subject"] == subject]
+        feature = request.args.get("feature")
+        if feature:
+            rows = [r for r in rows if r["featureKey"] == feature]
         if request.args.get("summary"):
             # One value for a Grafana stat panel: a subject is admitted only
             # when every entitlement it holds still reports hasAccess.
