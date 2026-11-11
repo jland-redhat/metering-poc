@@ -21,12 +21,22 @@ kafka:
     default.replication.factor: 1
   controller:
     replicaCount: 1
+    # The JVM runs with -Xmx1024m, so a 1Gi container limit leaves no room for
+    # metaspace and native memory; the pod was OOM-killed and restarted under
+    # load. The liveness probe (pgrep) also killed it while it was busy. Both
+    # make every Kafka restart leave the sink worker stuck on stale broker
+    # connections ("2/2 brokers are down") until it is restarted.
     resources:
       requests:
         cpu: 250m
-        memory: 512Mi
-      limits:
         memory: 1Gi
+      limits:
+        memory: 2Gi
+    livenessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 6
   listeners:
     client:
       protocol: PLAINTEXT
