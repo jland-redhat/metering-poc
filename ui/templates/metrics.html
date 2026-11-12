@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenMeter metrics</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>OpenMeter metrics</h1>
+      <nav class="nav">
+        <a href="/">&larr; Price editor</a>
+        <span class="sep">&middot;</span>
+        <span class="current">Metrics</span>
+      </nav>
+      <p class="meta">Every meter and feature OpenMeter knows about, plus the
+        endpoints this PoC can use to add or change metering.</p>
+    </header>
+
+    <p id="banner" class="banner" hidden></p>
+
+    <section id="meters">
+      <h2>Meters</h2>
+      <p class="meta">A meter counts one JSON field from an event type, with an
+        aggregation. <code>valueProperty</code> is the JSONPath counted;
+        <code>COUNT</code> ignores it and counts events.</p>
+      <table id="meter-table">
+        <thead>
+          <tr>
+            <th>Slug</th>
+            <th>Name</th>
+            <th>Aggregation</th>
+            <th>Event type</th>
+            <th>Value property</th>
+            <th>Features</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="features">
+      <h2>Features</h2>
+      <p class="meta">A feature is the entitlement-checkable name on top of a
+        meter. <code>meterGroupByFilters</code> narrows the meter, for example
+        to one model, so each model can carry its own price and grant.</p>
+      <table id="feature-table">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Name</th>
+            <th>Meter</th>
+            <th>Group-by filter</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="create">
+      <h2>Add a metric</h2>
+      <p class="meta">Creates a meter and, if a feature key is given, a feature
+        bound to it. Nothing else changes: existing meters, features, plans and
+        entitlements are left alone.</p>
+      <form id="metric-form" class="form-grid">
+        <label>
+          <span>Meter slug</span>
+          <input type="text" name="slug" required
+                 pattern="[a-z][a-z0-9_]*" placeholder="prompt_tokens_v2">
+        </label>
+        <label>
+          <span>Name</span>
+          <input type="text" name="name" placeholder="Prompt tokens v2">
+        </label>
+        <label>
+          <span>Aggregation</span>
+          <select name="aggregation" id="aggregation"></select>
+        </label>
+        <label>
+          <span>Event type</span>
+          <input type="text" name="eventType" required
+                 placeholder="inference.tokens.used">
+        </label>
+        <label>
+          <span>Value property (JSONPath)</span>
+          <input type="text" name="valueProperty" placeholder="$.prompt_tokens">
+        </label>
+        <label>
+          <span>Description</span>
+          <input type="text" name="description"
+                 placeholder="Optional note for operators">
+        </label>
+        <label>
+          <span>Feature key (optional)</span>
+          <input type="text" name="featureKey"
+                 pattern="[a-z][a-z0-9_]*" placeholder="prompt_tokens_v2">
+        </label>
+        <label>
+          <span>Feature name (optional)</span>
+          <input type="text" name="featureName" placeholder="Prompt tokens v2">
+        </label>
+        <div class="actions">
+          <button type="submit" id="create-btn">Create meter</button>
+          <span id="create-status" class="status"></span>
+        </div>
+      </form>
+      <div id="create-result" hidden>
+        <table>
+          <thead>
+            <tr><th>Step</th><th>HTTP</th><th>Response</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="query">
+      <h2>Query a meter</h2>
+      <p class="meta">Reads current values from one meter, grouped by subject
+        and model. Times are ISO 8601 in UTC; blank means all time.</p>
+      <form id="query-form" class="form-grid">
+        <label>
+          <span>Meter</span>
+          <select name="meter" id="meter-select"></select>
+        </label>
+        <label>
+          <span>From</span>
+          <input type="text" name="from" placeholder="2026-11-01T00:00:00Z">
+        </label>
+        <label>
+          <span>To</span>
+          <input type="text" name="to" placeholder="2026-12-01T00:00:00Z">
+        </label>
+        <label>
+          <span>Subject (optional)</span>
+          <input type="text" name="subject" placeholder="openclaw_app">
+        </label>
+        <div class="actions">
+          <button type="submit" id="query-btn">Query</button>
+          <span id="query-status" class="status"></span>
+        </div>
+      </form>
+      <table id="usage-table" hidden>
+        <thead>
+          <tr><th>Subject</th><th>Model</th><th>Value</th><th>Window</th></tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot>
+          <tr><th colspan="2">Total</th><th id="usage-total">&mdash;</th><th></th></tr>
+        </tfoot>
+      </table>
+    </section>
+
+    <section id="endpoints">
+      <h2>Endpoints that change state</h2>
+      <p class="meta">The OpenMeter calls this PoC uses. The first two are
+        driven by the form above; the rest are driven by the price editor and
+        the seed scripts, or proxied straight through.</p>
+      <table id="endpoint-table">
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>What it changes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/meters</td>
+            <td>Creates a meter: aggregation, event type and counted JSONPath.</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/features</td>
+            <td>Creates a feature bound to a meter, optionally filtered by a group-by value.</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/customers</td>
+            <td>Creates a customer and its usage attribution (subject keys).</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/subjects/{subject}/entitlements</td>
+            <td>Grants a metered entitlement: feature, usage period, issue-after-reset amount.</td>
+          </tr>
+          <tr>
+            <td class="model">PUT</td>
+            <td class="model">/api/v1/subjects/{subject}/entitlements/{id}/override</td>
+            <td>Replaces an entitlement with a new grant (the budget editor uses this).</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/subjects/{subject}/entitlements/{id}/reset</td>
+            <td>Starts a new usage period at a given time, zeroing period usage.</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/plans/{key}/next</td>
+            <td>Creates the next draft plan version.</td>
+          </tr>
+          <tr>
+            <td class="model">PUT</td>
+            <td class="model">/api/v1/plans/{id}</td>
+            <td>Rewrites a draft plan's phases and rate cards.</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/plans/{id}/publish</td>
+            <td>Publishes the draft as the active version.</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/subscriptions/{id}/change</td>
+            <td>Moves a subscription to another plan version (immediate timing).</td>
+          </tr>
+          <tr>
+            <td class="model">POST</td>
+            <td class="model">/api/v1/events</td>
+            <td>Ingests a usage CloudEvent; the metering relay prices it before forwarding.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      <p>Read-only lists come from <code>GET /api/v1/meters</code> and
+        <code>GET /api/v1/features</code>. Creating a metric does not price it
+        or grant it: add a rate card on a plan and an entitlement for a subject
+        to make it billable.</p>
+    </footer>
+  </main>
+  <script src="/static/metrics.js"></script>
+</body>
+</html>

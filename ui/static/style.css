@@ -124,7 +124,45 @@ button.small { padding: 4px 10px; font-size: 0.85rem; }
 
 footer { margin-top: 40px; color: var(--muted); font-size: 0.9rem; }
 
+.nav { display: flex; align-items: center; gap: 8px; margin: 6px 0 8px; font-size: 0.9rem; }
+.nav a { color: var(--accent); text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+.nav .sep, .nav .current { color: var(--muted); }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 16px 0 0;
+}
+
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+.form-grid label > span { font-weight: 600; }
+
+.form-grid input[type="text"],
+.form-grid select {
+  font: inherit;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  width: 100%;
+}
+
+.form-grid input[type="text"]:focus,
+.form-grid select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.form-grid .actions { grid-column: 1 / -1; margin-top: 4px; }
+
+#create-result { margin-top: 16px; overflow-x: auto; }
+#create-result td.model { word-break: break-word; }
+#usage-table td.model.ok { color: var(--ok); }
+td.model.ok { color: var(--ok); }
+#usage-table { overflow-x: auto; }
+
 @media (max-width: 640px) {
   th:nth-child(2), td:nth-child(2) { display: none; }
   td input[type="number"] { width: 100px; }
+  .form-grid { grid-template-columns: 1fr; }
 }

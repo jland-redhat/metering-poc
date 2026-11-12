@@ -141,21 +141,42 @@ else
 fi
 
 say "== ingestion =="
+sink_restarted=0
+restart_sink() {
+  oc rollout restart deploy/openmeter-sink-worker -n "${NAMESPACE}" >/dev/null
+  oc rollout status deploy/openmeter-sink-worker -n "${NAMESPACE}" --timeout=180s >/dev/null
+  sink_restarted=1
+}
+
 sink_errors=$(oc logs deployment/openmeter-sink-worker -n "${NAMESPACE}" --since=2m 2>/dev/null \
   | grep -c 'brokers are down' || true)
 if [[ "${sink_errors}" -gt 0 ]]; then
   fix "sink worker has stale Kafka connections; restarting it"
-  oc rollout restart deploy/openmeter-sink-worker -n "${NAMESPACE}" >/dev/null
-  oc rollout status deploy/openmeter-sink-worker -n "${NAMESPACE}" --timeout=180s >/dev/null
+  restart_sink
   ok "openmeter-sink-worker restarted"
 else
-  ok "openmeter-sink-worker has no recent broker errors"
+  # A Kafka restart also leaves the sink stuck without logging broker errors:
+  # the pod stays Running but never rejoins the consumer group. A sink pod
+  # older than the Kafka pod is that state.
+  sink_start=$(oc get pods -n "${NAMESPACE}" -l app.kubernetes.io/component=sink-worker \
+    -o jsonpath='{.items[0].status.startTime}' 2>/dev/null || echo "")
+  kafka_start=$(oc get pod openmeter-kafka-controller-0 -n "${NAMESPACE}" \
+    -o jsonpath='{.status.startTime}' 2>/dev/null || echo "")
+  if [[ -n "${sink_start}" && -n "${kafka_start}" ]] \
+      && [[ "$(date -d "${sink_start}" +%s)" -lt "$(date -d "${kafka_start}" +%s)" ]]; then
+    fix "sink worker started before the current Kafka pod; restarting it"
+    restart_sink
+    ok "openmeter-sink-worker restarted"
+  else
+    ok "openmeter-sink-worker has no recent broker errors"
+  fi
 fi
 
 say
 say "State:"
-printf '  %-28s %s\n' "controller replicas" \
-  "$(oc get deployment "${CONTROLLER_DEPLOYMENT}" -n "${CONTROLLER_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 'n/a')"
+controller_replicas=$(oc get deployment "${CONTROLLER_DEPLOYMENT}" -n "${CONTROLLER_NAMESPACE}" \
+  -o jsonpath='{.status.replicas}' 2>/dev/null || echo n/a)
+printf '  %-28s %s\n' "controller replicas" "${controller_replicas:-0}"
 printf '  %-28s %s\n' "configmap filter" "${cm_filters}"
 printf '  %-28s %s\n' "pod filter" "${pod_filters}"
 printf '  %-28s %s\n' "sink broker errors (2m)" "${sink_errors}"

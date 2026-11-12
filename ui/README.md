@@ -1,11 +1,13 @@
 # OpenMeter price editor
 
-A small Flask app that gives the MaaS metering PoC a self-service screen for two
-things:
+A small Flask app that gives the MaaS metering PoC self-service screens for
+three things:
 
 1. **Unit prices** — the per-token price for each model and token type on the
    active OpenMeter plan.
 2. **Budgets** — the token grant that decides when a subject is cut off.
+3. **Metrics** — the meters and features underneath prices and budgets, with a
+   form to add new ones (the `/metrics` page).
 
 It also exposes a read-only cost endpoint so the Grafana dashboard can show
 spend without reimplementing price arithmetic in dashboard JSON.
@@ -281,6 +283,7 @@ subject crosses it.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Editor page |
+| `GET` | `/metrics` | Metrics page: lists meters and features, creates new ones, queries a meter |
 | `GET` | `/healthz` | Liveness/readiness probe |
 | `GET` | `/api/state` | Active plan, rate cards, subscriptions |
 | `POST` | `/api/prices` | Body `{"prices": {"<rateCardKey>": <amount>}}`; creates and publishes the next plan version |
@@ -290,10 +293,35 @@ subject crosses it.
 | `GET` | `/api/spend-by-model?from=&to=` | JSON array with one row per model (`model`, `promptTokens`, `completionTokens`, `tokens`, `spent`); optional `subject` filter. Built for the Grafana "Spend by model" table |
 | `GET` | `/api/enforcement` | Enforcement switch state; forwarded to the relay |
 | `POST` | `/api/enforcement` | Body `{"enforce": <bool>}`; switches the relay's balance answer |
+| `GET` | `/api/metrics` | Meters with their features, all features, and the allowed aggregations |
+| `POST` | `/api/metrics` | Body `{"slug", "name", "aggregation", "eventType", "valueProperty", "featureKey"?}`; creates a meter and optionally a feature. Returns the per-step OpenMeter status |
+| `GET` | `/api/metrics/usage?meter=&from=&to=&subject=` | One meter's values grouped by subject and model, with a total |
 | `POST` | `/meter` | Metering relay: prices one usage CloudEvent and forwards it to OpenMeter |
 | `*` | `/<path>` | Any other path proxied to OpenMeter unchanged (the filter's balance check) |
 
 All routes return `{"error": "..."}` with a non-2xx status on failure.
+
+## The metrics page
+
+`/metrics` is a second page for looking at the metering objects as they are,
+and for adding new ones. It does not change the price editor or any route the
+gateway uses.
+
+- **Meters** — every meter from `GET /api/v1/meters`: slug, aggregation, event
+  type, counted JSONPath, and the features bound to it.
+- **Features** — every feature from `GET /api/v1/features`, including the
+  `meterGroupByFilters` that narrows a meter to one model.
+- **Add a metric** — creates a meter and, if a feature key is supplied, a
+  feature bound to it. Both steps report their own OpenMeter HTTP status, so an
+  "already exists" 409 is visible instead of aborting the request.
+- **Query a meter** — reads `GET /api/v1/meters/{slug}/query` for a meter over
+  an optional time window, grouped by subject and model.
+- **Endpoints that change state** — a reference list of the OpenMeter calls the
+  PoC relies on for meters, features, entitlements, plans, subscriptions and
+  event ingestion.
+
+Creating a metric does not make it billable. To price it, add a rate card on a
+plan; to cut a subject off on it, grant an entitlement for the new feature.
 
 ## Configuration
 

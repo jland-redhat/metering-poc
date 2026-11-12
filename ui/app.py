@@ -13,7 +13,9 @@ Environment:
 """
 
 import os
+import re
 import threading
+from urllib.parse import quote
 
 import requests
 from flask import Flask, jsonify, render_template, request
@@ -784,6 +786,212 @@ def set_prices():
         return jsonify(result)
     except OpenMeterError as exc:
         return jsonify({"error": str(exc)}), exc.status
+
+
+# --- Metrics page -----------------------------------------------------------
+#
+# A second screen that lists every OpenMeter meter and feature and can create
+# new ones. It is additive: the routes below have their own paths and none of
+# the routes above change. `/metrics` is a static rule, so it wins over the
+# `/<path:path>` catch-all proxy; `/api/metrics*` never collides with
+# OpenMeter, whose paths all start with `/api/v1/`.
+
+METRIC_AGGREGATIONS = (
+    "SUM",
+    "COUNT",
+    "UNIQUE_COUNT",
+    "AVG",
+    "MIN",
+    "MAX",
+    "LATEST",
+)
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def openmeter_call(method, path, body=None):
+    """Like api() but returns (status, payload) for non-2xx instead of raising.
+
+    The metrics page reports per-step OpenMeter responses, so a 409 for an
+    existing meter is data the operator should see, not an exception.
+    """
+    url = f"{OPENMETER_URL}{path}"
+    try:
+        resp = requests.request(method, url, json=body, timeout=15)
+    except requests.RequestException as exc:
+        raise OpenMeterError(f"cannot reach OpenMeter at {OPENMETER_URL}: {exc}") from exc
+    try:
+        payload = resp.json() if resp.content else None
+    except ValueError:
+        payload = resp.text[:500]
+    return resp.status_code, payload
+
+
+def metric_state():
+    """Return meters, features and the allowed aggregations."""
+    data = api("GET", "/api/v1/meters")
+    items = data.get("items", []) if isinstance(data, dict) else data
+    features = features_by_key()
+    by_meter = {}
+    for key, feature in features.items():
+        by_meter.setdefault(feature.get("meterSlug"), []).append(key)
+
+    meters = []
+    for meter in items or []:
+        meters.append(
+            {
+                "slug": meter.get("slug"),
+                "name": meter.get("name"),
+                "description": meter.get("description"),
+                "aggregation": meter.get("aggregation"),
+                "eventType": meter.get("eventType"),
+                "valueProperty": meter.get("valueProperty"),
+                "features": sorted(by_meter.get(meter.get("slug"), [])),
+            }
+        )
+    meters.sort(key=lambda m: m.get("slug") or "")
+
+    return {
+        "meters": meters,
+        "features": [
+            {
+                "key": feature.get("key"),
+                "name": feature.get("name"),
+                "meterSlug": feature.get("meterSlug"),
+                "meterGroupByFilters": feature.get("meterGroupByFilters"),
+            }
+            for feature in sorted(
+                features.values(), key=lambda f: f.get("key") or ""
+            )
+        ],
+        "aggregations": list(METRIC_AGGREGATIONS),
+    }
+
+
+@app.get("/metrics")
+def metrics_page():
+    return render_template("metrics.html")
+
+
+@app.get("/api/metrics")
+def metrics_state():
+    try:
+        return jsonify(metric_state())
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+
+
+@app.post("/api/metrics")
+def create_metric():
+    """Create a meter, and optionally a feature bound to it.
+
+    Body:
+      {"slug": "...", "name": "...", "aggregation": "SUM",
+       "eventType": "inference.tokens.used", "valueProperty": "$.total_tokens",
+       "description": "...", "featureKey": "...", "featureName": "..."}
+
+    `valueProperty` is required unless the aggregation is COUNT. When
+    `featureKey` is set, a feature is created against the new meter so an
+    entitlement can reference it.
+    """
+    payload = request.get_json(silent=True) or {}
+    slug = str(payload.get("slug") or "").strip()
+    name = str(payload.get("name") or "").strip() or slug
+    aggregation = str(payload.get("aggregation") or "SUM").strip().upper()
+    event_type = str(payload.get("eventType") or "").strip()
+    value_property = str(payload.get("valueProperty") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    feature_key = str(payload.get("featureKey") or "").strip()
+    feature_name = str(payload.get("featureName") or "").strip() or feature_key
+
+    if not _SLUG_RE.match(slug):
+        return jsonify(
+            {"error": "slug must match ^[a-z][a-z0-9_]*$ (lowercase, digits, underscores)"}
+        ), 400
+    if aggregation not in METRIC_AGGREGATIONS:
+        return jsonify(
+            {"error": f"aggregation must be one of {', '.join(METRIC_AGGREGATIONS)}"}
+        ), 400
+    if not event_type:
+        return jsonify({"error": "eventType is required"}), 400
+    if aggregation != "COUNT" and not value_property.startswith("$."):
+        return jsonify(
+            {"error": "valueProperty must be a JSONPath such as $.total_tokens"}
+        ), 400
+    if feature_key and not _SLUG_RE.match(feature_key):
+        return jsonify(
+            {"error": "featureKey must match ^[a-z][a-z0-9_]*$"}
+        ), 400
+
+    meter_body = {
+        "slug": slug,
+        "name": name,
+        "aggregation": aggregation,
+        "eventType": event_type,
+    }
+    if description:
+        meter_body["description"] = description
+    if aggregation != "COUNT":
+        meter_body["valueProperty"] = value_property
+
+    results = []
+    status, body = openmeter_call("POST", "/api/v1/meters", meter_body)
+    meter_ok = 200 <= status < 300
+    results.append({"step": "meter", "status": status, "ok": meter_ok, "response": body})
+
+    feature_ok = None
+    if feature_key:
+        feature_body = {"key": feature_key, "name": feature_name, "meterSlug": slug}
+        status, body = openmeter_call("POST", "/api/v1/features", feature_body)
+        feature_ok = 200 <= status < 300
+        results.append(
+            {"step": "feature", "status": status, "ok": feature_ok, "response": body}
+        )
+
+    ok = meter_ok and feature_ok is not False
+    try:
+        state = metric_state()
+    except OpenMeterError:
+        state = None
+    return jsonify({"ok": ok, "results": results, "state": state}), (
+        200 if ok else 502
+    )
+
+
+@app.get("/api/metrics/usage")
+def metric_usage():
+    """Query one meter's values, grouped by subject and model."""
+    slug = request.args.get("meter") or ""
+    if not _SLUG_RE.match(slug):
+        return jsonify({"error": "meter must be a meter slug"}), 400
+    start = request.args.get("from") or "1970-01-01T00:00:00Z"
+    end = request.args.get("to") or "2100-01-01T00:00:00Z"
+    path = (
+        f"/api/v1/meters/{slug}/query"
+        f"?from={quote(start, safe='')}&to={quote(end, safe='')}"
+        "&groupBy=subject&groupBy=model"
+    )
+    try:
+        data = api("GET", path)
+    except OpenMeterError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+
+    rows = []
+    for point in data.get("data", []) or []:
+        rows.append(
+            {
+                "subject": point.get("subject"),
+                "model": (point.get("groupBy") or {}).get("model"),
+                "value": point.get("value"),
+                "from": point.get("windowStart"),
+                "to": point.get("windowEnd"),
+            }
+        )
+    subject = request.args.get("subject")
+    if subject:
+        rows = [row for row in rows if row.get("subject") == subject]
+    rows.sort(key=lambda row: (row.get("subject") or "", row.get("model") or ""))
+    total = sum(float(row.get("value") or 0) for row in rows)
+    return jsonify({"meter": slug, "rows": rows, "total": total})
 
 
 if __name__ == "__main__":
