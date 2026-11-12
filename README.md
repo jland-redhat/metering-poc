@@ -121,6 +121,10 @@ Deployment assets for the cluster PoC live under `deploy/` and `scripts/`:
   meters traffic as the OpenMeter subject `openclaw_app`.
 - `scripts/smoke-test.sh` — send one inference request through the gateway and
   confirm OpenMeter received the usage event with non-zero token counts.
+- `scripts/fix-metering.sh` — repair the recurring states: missing
+  `external_metering` filter after a controller resync or pod restart, and a
+  sink worker stuck on stale Kafka connections after a Kafka restart. Pass
+  `--scale-controller` to stop the resync source first.
 - `ui/`, `deploy/ui/ui.yaml` — one Flask image deployed twice in `metering`:
   `openmeter-price-editor` serves the price/budget UI on port 8080 behind an
   edge Route, and `openmeter-metering-proxy` is the metering relay on port
