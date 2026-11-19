@@ -246,3 +246,38 @@ OpenMeter key. Set that subject's balance first, or override it with
 ## Container runtime
 
 Prefer **Podman** for local compose. Docker-compatible commands are fine as an alternative (see ADR deploy notes).
+
+## Price Tag PoC (branch `pricetag`)
+
+This branch replaces OpenMeter with [Price Tag](https://github.com/operating-actor/pricetag-metering)
+(pricetag-metering, the ENMaaS dogfooding metering service) to evaluate it as
+the MaaS budget-enforcement backend. Feasibility assessment:
+https://gist.github.com/jland-redhat/56cfbca96b90079ee9911e057373c50c
+
+- Image: `quay.io/maas/price-tag:pricetag-poc`, built from the vendored
+  pricetag-metering source in the `ai-gateway-controller` repo (branch
+  `pricetag-poc`, `make build-push-price-tag-image`).
+- Deploy: `deploy/price-tag/` — PostgreSQL + price-tag service in namespace
+  `metering`. Service port 6443 (the payload-processing NetworkPolicy allows
+  DNS and TCP 443/6443 egress; OVN applies policy after DNAT, so the pod port
+  must be 6443). No Route — admin access via `oc port-forward`.
+- Wiring: same `enable-maas-metering.sh` as the OpenMeter PoC, pointed at
+  `http://price-tag.metering.svc.cluster.local:6443`. The praxis
+  `external_metering` filter reports CloudEvents token usage to
+  `POST /api/v1/events`, which Price Tag prices and freezes into its
+  `usage_events` ledger. Price Tag also serves the legacy entitlement value
+  endpoint (`GET /api/v1/customers/{user}/entitlements/{key}/value`) that the
+  gateway consults pre-inference for the budget admission decision.
+
+### Run it
+
+```sh
+./scripts/install-price-tag.sh
+./scripts/enable-maas-metering.sh \
+  --url http://price-tag.metering.svc.cluster.local:6443 \
+  --feature inference_tokens
+./scripts/set-price-tag-budget.sh --default 50
+GATEWAY_URL=https://<gateway> ./scripts/price-tag-smoke-test.sh
+# drive a user over budget and watch the gateway 429:
+./scripts/set-price-tag-budget.sh --user cluster_admin --usd 0
+```

@@ -1,0 +1,73 @@
+# Price Tag metering service (PoC).
+#
+# Image: quay.io/maas/price-tag:pricetag-poc, built from the vendored copy of
+# pricetag-metering in the ai-gateway-controller repo (branch pricetag-poc).
+#
+# Port: the service listens on 6443 (PORT env), matching the port the
+# payload-processing NetworkPolicy allows for egress (DNS, TCP 443/6443).
+# OVN applies NetworkPolicy after service DNAT, so the pod port itself must
+# be 6443 — a service port 6443 backed by pod port 8080 would be blocked.
+#
+# PoC auth posture (no Route is created — the service is reachable only
+# in-cluster, and admin/seed access goes through `oc port-forward`):
+#   M2M_AUTH_REQUIRED=false          — gateway events/entitlement calls unauthenticated
+#   ALLOW_UNAUTHENTICATED_ADMIN=true — admin safety-net API usable via port-forward
+# QUOTA_ENFORCEMENT_ENABLED=true turns the quota decision into deny on exhaust.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-tag
+  namespace: metering
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-tag
+  template:
+    metadata:
+      labels:
+        app: price-tag
+    spec:
+      containers:
+        - name: price-tag
+          image: quay.io/maas/price-tag:pricetag-poc
+          env:
+            - name: PORT
+              value: "6443"
+            - name: METERING_MODE
+              value: all
+            - name: DATABASE_URL
+              value: postgres://metering:metering@price-tag-postgres.metering.svc.cluster.local:5432/metering?sslmode=disable
+            - name: QUOTA_ENFORCEMENT_ENABLED
+              value: "true"
+            - name: M2M_AUTH_REQUIRED
+              value: "false"
+            - name: ALLOW_UNAUTHENTICATED_ADMIN
+              value: "true"
+          ports:
+            - containerPort: 6443
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6443
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6443
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: price-tag
+  namespace: metering
+spec:
+  selector:
+    app: price-tag
+  ports:
+    - name: http
+      port: 6443
+      targetPort: 6443

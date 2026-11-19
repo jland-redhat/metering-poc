@@ -1,0 +1,66 @@
+# PostgreSQL for the price-tag metering service.
+# Single non-HA instance — PoC only, no production claims.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: price-tag-postgres
+  namespace: metering
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-tag-postgres
+  namespace: metering
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-tag-postgres
+  template:
+    metadata:
+      labels:
+        app: price-tag-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: metering
+            - name: POSTGRES_USER
+              value: metering
+            - name: POSTGRES_PASSWORD
+              value: metering
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "metering"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: price-tag-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: price-tag-postgres
+  namespace: metering
+spec:
+  selector:
+    app: price-tag-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
