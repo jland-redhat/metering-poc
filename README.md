@@ -247,37 +247,75 @@ OpenMeter key. Set that subject's balance first, or override it with
 
 Prefer **Podman** for local compose. Docker-compatible commands are fine as an alternative (see ADR deploy notes).
 
-## Price Tag PoC (branch `pricetag`)
+## Price Tag PoC (branch `pricetag`) — verified end to end
 
-This branch replaces OpenMeter with [Price Tag](https://github.com/operating-actor/pricetag-metering)
+This branch replaces OpenMeter with [Price Tag](https://github.com/jland-redhat/pricetag-metering)
 (pricetag-metering, the ENMaaS dogfooding metering service) to evaluate it as
 the MaaS budget-enforcement backend. Feasibility assessment:
 https://gist.github.com/jland-redhat/56cfbca96b90079ee9911e057373c50c
 
-- Image: `quay.io/maas/price-tag:pricetag-poc`, built from the vendored
-  pricetag-metering source in the `ai-gateway-controller` repo (branch
-  `pricetag-poc`, `make build-push-price-tag-image`).
+ADR annotations declaring the initial Budget Service release is based on
+Price Tag: https://github.com/mariusdanciu/architecture-decision-records/pull/4
+
+### Components
+
+- Image: `quay.io/maas/price-tag:pricetag-poc` (public), built from the
+  vendored pricetag-metering source in the `ai-gateway-controller` repo
+  (branch `pricetag-poc`, `make build-push-price-tag-image`).
 - Deploy: `deploy/price-tag/` — PostgreSQL + price-tag service in namespace
   `metering`. Service port 6443 (the payload-processing NetworkPolicy allows
   DNS and TCP 443/6443 egress; OVN applies policy after DNAT, so the pod port
   must be 6443). No Route — admin access via `oc port-forward`.
-- Wiring: same `enable-maas-metering.sh` as the OpenMeter PoC, pointed at
-  `http://price-tag.metering.svc.cluster.local:6443`. The praxis
-  `external_metering` filter reports CloudEvents token usage to
-  `POST /api/v1/events`, which Price Tag prices and freezes into its
-  `usage_events` ledger. Price Tag also serves the legacy entitlement value
-  endpoint (`GET /api/v1/customers/{user}/entitlements/{key}/value`) that the
-  gateway consults pre-inference for the budget admission decision.
+- Gateway wiring (already live on jland-aws-1-pool-6rn6z): the praxis
+  `external_metering` + `token_count` filters are the first two items of the
+  `ipp` chain in ConfigMap `payload-processing-plugins`
+  (openshift-ingress), pointed at
+  `http://price-tag.metering.svc.cluster.local:6443`. Usage flows:
+  gateway → external_metering balance check + CloudEvent report → Price Tag
+  prices the event and freezes it into `usage_events`.
+- Budgets: `quota_policy` default ($600/user/month, enforced) + per-user
+  `quota_overrides`. No HTTP API for overrides — writes go via psql
+  (`scripts/set-price-tag-budget.sh`).
+
+### Verified behavior (2026-11-20, cluster jland-aws-1-pool-6rn6z)
+
+- Request through the gateway produced a priced ledger row:
+  `username=kube:admin, model=publishers/llm/models/facebook/opt-125m,
+  prompt_tokens=11, completion_tokens=32, cost_usd=$0.002565`.
+- `$0` per-user override → decision flipped to
+  `hasAccess:false, denyReason:"quota_exhausted"` after the ~60s quota
+  decision cache expired → gateway returned **HTTP 429 `token budget
+  exhausted`**.
+- Override removed → decision and gateway admission restored.
+- Unplanned fail-open proof: the `metering` namespace was deleted under the
+  running setup; the filter logged `balance check unreachable` and admitted
+  traffic (`fail_open: true`), as designed.
 
 ### Run it
 
 ```sh
 ./scripts/install-price-tag.sh
-./scripts/enable-maas-metering.sh \
-  --url http://price-tag.metering.svc.cluster.local:6443 \
-  --feature inference_tokens
+# gateway wiring: inject external_metering+token_count at the TOP of the
+# ipp chain in payload-processing-plugins (openshift-ingress) and restart
+# deployment/payload-processing — before the headers filter that strips
+# x-maas-* identity headers
 ./scripts/set-price-tag-budget.sh --default 50
-GATEWAY_URL=https://<gateway> ./scripts/price-tag-smoke-test.sh
-# drive a user over budget and watch the gateway 429:
-./scripts/set-price-tag-budget.sh --user cluster_admin --usd 0
+./scripts/set-price-tag-budget.sh --user kube:admin --usd 0   # exhaust
+# request (works with a MaaS API key; kube:admin tokens 403 on the
+# /publishers/... path form — subscription CEL parses model from the
+# first two path segments):
+curl -sk -X POST \
+  "https://maas.apps.jland-maas-d-pool-2s6s6.aws.rh-ods.com/llm/free-model/v1/chat/completions" \
+  -H "Authorization: Bearer <maas-api-key>" -H 'Content-Type: application/json' \
+  -d '{"model":"publishers/llm/models/facebook/opt-125m",
+       "messages":[{"role":"user","content":"Say hello in five words."}],
+       "max_tokens":32}'
+./scripts/set-price-tag-budget.sh   # inspect policy + overrides
 ```
+
+### Known gaps (tracked in the ADR PR)
+
+Event deduplication, rate versioning, tenant scoping, the Redis admission
+flag path, and the management REST API are absent in Price Tag — see the
+gap analysis in
+[mariusdanciu/architecture-decision-records#4](https://github.com/mariusdanciu/architecture-decision-records/pull/4).

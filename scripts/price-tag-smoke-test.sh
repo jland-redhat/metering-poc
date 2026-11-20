@@ -12,6 +12,7 @@ set -euo pipefail
 
 GATEWAY_URL="${GATEWAY_URL:?set GATEWAY_URL to the MaaS gateway base URL}"
 MODEL="${MODEL:-publishers/llm/models/facebook/opt-125m}"
+PATH_SUFFIX="${PATH_SUFFIX:-/llm/free-model/v1/chat/completions}"
 NAMESPACE="${NAMESPACE:-metering}"
 LOCAL_PORT="${LOCAL_PORT:-48889}"
 EXTPROC_NAMESPACE="${EXTPROC_NAMESPACE:-openshift-ingress}"
