@@ -4,9 +4,8 @@
 # PostgreSQL (the same rows the Price Tag admin API writes; the admin HTTP
 # API is behind an OIDC session the PoC does not configure).
 #
-# NO AUTH. Do not expose via a Route — access with
+# NO AUTH — demo only. Access via the edge Route below or
 #   oc port-forward -n metering svc/price-tag-ui 8080:8080
-#   or the edge Route (demo, no auth): https://price-tag-ui-metering.apps.<apps-domain>
 apiVersion: apps/v1
 kind: Deployment
 metadata:
