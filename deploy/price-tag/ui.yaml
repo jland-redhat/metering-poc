@@ -24,6 +24,7 @@ spec:
       containers:
         - name: ui
           image: quay.io/maas/price-tag-ui:demo
+          imagePullPolicy: Always
           env:
             - name: DATABASE_URL
               value: postgres://metering:metering@price-tag-postgres.metering.svc.cluster.local:5432/metering?sslmode=disable

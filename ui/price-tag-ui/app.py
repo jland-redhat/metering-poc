@@ -133,6 +133,14 @@ TEMPLATE = """
 <tr><td colspan="6" class="muted">no events yet — send a request through the gateway</td></tr>
 {% endfor %}
 </table>
+<script>
+  // Hot reload: refresh every 10s unless the user is typing in a form.
+  setInterval(function () {
+    var el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT')) return;
+    window.location.reload();
+  }, 10000);
+</script>
 </body>
 </html>
 """
