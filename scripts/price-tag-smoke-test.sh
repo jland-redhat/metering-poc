@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "Sending chat completion through MaaS"
-response=$(curl -skS -w '\n%{http_code}' -X POST "${GATEWAY_URL}/v1/chat/completions" \
+response=$(curl -skS -w '\n%{http_code}' -X POST "${GATEWAY_URL}${PATH_SUFFIX}" \
   -H "Authorization: Bearer ${MAAS_API_KEY}" \
   -H 'Content-Type: application/json' \
   -d "{
