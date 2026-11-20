@@ -1,0 +1,56 @@
+# Price Tag demo UI — budget + pricing editor, demo purposes only.
+#
+# Writes quota_policy / quota_overrides / model_pricing directly in
+# PostgreSQL (the same rows the Price Tag admin API writes; the admin HTTP
+# API is behind an OIDC session the PoC does not configure).
+#
+# NO AUTH. Do not expose via a Route — access with
+#   oc port-forward -n metering svc/price-tag-ui 8080:8080
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-tag-ui
+  namespace: metering
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-tag-ui
+  template:
+    metadata:
+      labels:
+        app: price-tag-ui
+    spec:
+      containers:
+        - name: ui
+          image: quay.io/maas/price-tag-ui:demo
+          env:
+            - name: DATABASE_URL
+              value: postgres://metering:metering@price-tag-postgres.metering.svc.cluster.local:5432/metering?sslmode=disable
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: price-tag-ui
+  namespace: metering
+spec:
+  selector:
+    app: price-tag-ui
+  ports:
+    - port: 8080
+      targetPort: 8080
